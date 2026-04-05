@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { runTimeSplitBacktest } from '@/services/ml/hrBacktest';
+import { fetchTrainingExamplesFromSnapshots } from '@/services/hrTrainingSnapshotService';
 import type { HRTrainingExample } from '@/services/ml/types';
 
 export const dynamic = 'force-dynamic';
@@ -13,16 +14,27 @@ interface DiagnosticsRequestBody {
     learningRate?: number;
     l2Penalty?: number;
   };
+  startDate?: string;
+  endDate?: string;
 }
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as DiagnosticsRequestBody;
-    const examples = body.examples ?? [];
+    const body = (await request.json().catch(() => ({}))) as DiagnosticsRequestBody;
 
-    if (!Array.isArray(examples) || examples.length < 100) {
+    let examples = body.examples ?? [];
+
+    if (!Array.isArray(examples) || examples.length === 0) {
+      examples = await fetchTrainingExamplesFromSnapshots({
+        startDate: body.startDate,
+        endDate: body.endDate,
+        minRows: 100,
+      });
+    }
+
+    if (examples.length < 100) {
       return NextResponse.json(
-        { error: 'Provide at least 100 historical examples in the request body.' },
+        { error: `Need at least 100 labeled examples. Found ${examples.length}.` },
         { status: 400 }
       );
     }
@@ -31,6 +43,8 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       ok: true,
+      dataSource: 'supabase-hr_feature_snapshots',
+      exampleCount: examples.length,
       model: results.model,
       trainMetrics: results.trainMetrics,
       testMetrics: results.testMetrics,
