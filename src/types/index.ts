@@ -80,7 +80,6 @@ export interface Batter {
   lineupSpot: number | null;
   jerseyNumber: number;
   age: number;
-  /** Whether this player is in a confirmed lineup (true) or pulled from roster as early prediction (false) */
   lineupConfirmed?: boolean;
   season: {
     avg: number;
@@ -146,11 +145,6 @@ export interface Game {
   awayScore?: number;
   homeScore?: number;
   inning?: number;
-
-  /**
-   * Optional real team offense context for the prediction model.
-   * Only populate this if you have actual team-level data.
-   */
   teamOffense?: {
     away?: {
       teamSeasonHR?: number;
@@ -181,32 +175,25 @@ export interface HRProjection {
   projectedAtBats: number;
   keyFactors: string[];
   rank: number;
-
-  /** Whether the lineup is confirmed for this player */
   lineupConfirmed?: boolean;
-
-  /** Plain-English explanation of the projection based on model inputs */
   explanation?: string;
-
-  /** Gemini reference probability */
   geminiProbability?: number;
 
-  /** Final probability after bounded Gemini adjustment */
+  /**
+   * Advisory-only probability after bounded Gemini adjustment.
+   * Never replace hrProbability with this.
+   */
   adjustedProbability?: number;
 
-  /** The actual adjustment Gemini contributed, e.g. +0.8 or -0.5 */
+  /**
+   * Backwards-compatible alias for existing UI.
+   */
+  blendedProbability?: number;
+
   geminiAdjustmentApplied?: number;
-
-  /** Gemini's analytical reasoning */
   geminiReasoning?: string;
-
-  /** Gemini's single key insight */
   geminiKeyInsight?: string;
-
-  /** Gemini confidence level */
   geminiConfidence?: 'high' | 'medium' | 'low';
-
-  /** Optional UI helper: whether base model and Gemini broadly agreed */
   geminiDisagreementTier?: 'aligned' | 'mixed' | 'high';
 }
 
