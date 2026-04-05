@@ -1,0 +1,330 @@
+import type {
+  Team, Ballpark, Pitcher, Batter, Game, HRProjection, PitchTypeVulnerability
+} from '@/types';
+
+export const TEAMS: Record<string, Team> = {
+  'nyy': { id: 'nyy', name: 'Yankees', abbreviation: 'NYY', city: 'New York', league: 'AL', division: 'East', record: { wins: 4, losses: 2 }, logoColor: '#003087' },
+  'bos': { id: 'bos', name: 'Red Sox', abbreviation: 'BOS', city: 'Boston', league: 'AL', division: 'East', record: { wins: 3, losses: 3 }, logoColor: '#BD3039' },
+  'hou': { id: 'hou', name: 'Astros', abbreviation: 'HOU', city: 'Houston', league: 'AL', division: 'West', record: { wins: 5, losses: 1 }, logoColor: '#002D62' },
+  'sea': { id: 'sea', name: 'Mariners', abbreviation: 'SEA', city: 'Seattle', league: 'AL', division: 'West', record: { wins: 4, losses: 2 }, logoColor: '#0C2C56' },
+  'lad': { id: 'lad', name: 'Dodgers', abbreviation: 'LAD', city: 'Los Angeles', league: 'NL', division: 'West', record: { wins: 5, losses: 1 }, logoColor: '#005A9C' },
+  'sf':  { id: 'sf',  name: 'Giants',  abbreviation: 'SF',  city: 'San Francisco', league: 'NL', division: 'West', record: { wins: 2, losses: 4 }, logoColor: '#FD5A1E' },
+  'phi': { id: 'phi', name: 'Phillies', abbreviation: 'PHI', city: 'Philadelphia', league: 'NL', division: 'East', record: { wins: 4, losses: 2 }, logoColor: '#E81828' },
+  'atl': { id: 'atl', name: 'Braves',  abbreviation: 'ATL', city: 'Atlanta', league: 'NL', division: 'East', record: { wins: 3, losses: 3 }, logoColor: '#CE1141' },
+  'col': { id: 'col', name: 'Rockies', abbreviation: 'COL', city: 'Colorado', league: 'NL', division: 'West', record: { wins: 2, losses: 4 }, logoColor: '#33006F' },
+  'tex': { id: 'tex', name: 'Rangers', abbreviation: 'TEX', city: 'Texas', league: 'AL', division: 'West', record: { wins: 3, losses: 3 }, logoColor: '#003278' },
+  'cin': { id: 'cin', name: 'Reds',    abbreviation: 'CIN', city: 'Cincinnati', league: 'NL', division: 'Central', record: { wins: 3, losses: 3 }, logoColor: '#C6011F' },
+  'chc': { id: 'chc', name: 'Cubs',    abbreviation: 'CHC', city: 'Chicago', league: 'NL', division: 'Central', record: { wins: 2, losses: 4 }, logoColor: '#0E3386' },
+  'min': { id: 'min', name: 'Twins',   abbreviation: 'MIN', city: 'Minnesota', league: 'AL', division: 'Central', record: { wins: 4, losses: 2 }, logoColor: '#002B5C' },
+  'det': { id: 'det', name: 'Tigers',  abbreviation: 'DET', city: 'Detroit', league: 'AL', division: 'Central', record: { wins: 3, losses: 3 }, logoColor: '#0C2340' },
+  'mia': { id: 'mia', name: 'Marlins', abbreviation: 'MIA', city: 'Miami', league: 'NL', division: 'East', record: { wins: 1, losses: 5 }, logoColor: '#00A3E0' },
+  'tb':  { id: 'tb',  name: 'Rays',    abbreviation: 'TB',  city: 'Tampa Bay', league: 'AL', division: 'East', record: { wins: 4, losses: 2 }, logoColor: '#092C5C' },
+};
+
+export const BALLPARKS: Record<string, Ballpark> = {
+  'yankee-stadium': { id: 'yankee-stadium', name: 'Yankee Stadium', city: 'New York', teamId: 'nyy', hrFactor: 1.18, hrFactorTier: 'hitter', elevation: 55, dimensions: { leftField: 318, centerField: 408, rightField: 314 } },
+  'fenway-park': { id: 'fenway-park', name: 'Fenway Park', city: 'Boston', teamId: 'bos', hrFactor: 0.92, hrFactorTier: 'pitcher', elevation: 20, dimensions: { leftField: 310, centerField: 420, rightField: 302 } },
+  'minute-maid': { id: 'minute-maid', name: 'Minute Maid Park', city: 'Houston', teamId: 'hou', hrFactor: 1.06, hrFactorTier: 'neutral', elevation: 43, dimensions: { leftField: 315, centerField: 435, rightField: 326 } },
+  't-mobile-park': { id: 't-mobile-park', name: 'T-Mobile Park', city: 'Seattle', teamId: 'sea', hrFactor: 0.94, hrFactorTier: 'pitcher', elevation: 17, dimensions: { leftField: 331, centerField: 401, rightField: 326 } },
+  'dodger-stadium': { id: 'dodger-stadium', name: 'Dodger Stadium', city: 'Los Angeles', teamId: 'lad', hrFactor: 0.98, hrFactorTier: 'neutral', elevation: 512, dimensions: { leftField: 330, centerField: 395, rightField: 330 } },
+  'oracle-park': { id: 'oracle-park', name: 'Oracle Park', city: 'San Francisco', teamId: 'sf', hrFactor: 0.82, hrFactorTier: 'pitcher', elevation: 12, dimensions: { leftField: 339, centerField: 399, rightField: 309 } },
+  'citizens-bank': { id: 'citizens-bank', name: 'Citizens Bank Park', city: 'Philadelphia', teamId: 'phi', hrFactor: 1.22, hrFactorTier: 'hitter', elevation: 20, dimensions: { leftField: 329, centerField: 401, rightField: 330 } },
+  'truist-park': { id: 'truist-park', name: 'Truist Park', city: 'Atlanta', teamId: 'atl', hrFactor: 1.08, hrFactorTier: 'neutral', elevation: 1050, dimensions: { leftField: 335, centerField: 400, rightField: 325 } },
+  'coors-field': { id: 'coors-field', name: 'Coors Field', city: 'Colorado', teamId: 'col', hrFactor: 1.38, hrFactorTier: 'hitter', elevation: 5280, dimensions: { leftField: 347, centerField: 415, rightField: 350 } },
+  'globe-life': { id: 'globe-life', name: 'Globe Life Field', city: 'Texas', teamId: 'tex', hrFactor: 1.16, hrFactorTier: 'hitter', elevation: 551, dimensions: { leftField: 329, centerField: 407, rightField: 326 } },
+  'great-american': { id: 'great-american', name: 'Great American Ball Park', city: 'Cincinnati', teamId: 'cin', hrFactor: 1.28, hrFactorTier: 'hitter', elevation: 489, dimensions: { leftField: 328, centerField: 404, rightField: 325 } },
+  'wrigley-field': { id: 'wrigley-field', name: 'Wrigley Field', city: 'Chicago', teamId: 'chc', hrFactor: 1.04, hrFactorTier: 'neutral', elevation: 595, dimensions: { leftField: 355, centerField: 400, rightField: 353 } },
+  'target-field': { id: 'target-field', name: 'Target Field', city: 'Minnesota', teamId: 'min', hrFactor: 0.97, hrFactorTier: 'neutral', elevation: 830, dimensions: { leftField: 339, centerField: 404, rightField: 328 } },
+  'comerica-park': { id: 'comerica-park', name: 'Comerica Park', city: 'Detroit', teamId: 'det', hrFactor: 0.88, hrFactorTier: 'pitcher', elevation: 600, dimensions: { leftField: 345, centerField: 420, rightField: 330 } },
+};
+
+export const PITCHERS: Record<string, Pitcher> = {
+  'gerrit-cole': { id: 'gerrit-cole', name: 'Gerrit Cole', teamId: 'nyy', throws: 'R', era: 3.12, whip: 1.04, hr9: 0.9, hrFbRate: 0.094, kPer9: 11.2, bbPer9: 2.1, fbPct: 52.3, avgFastballVelo: 96.4, season: { gamesStarted: 3, innings: 19.1, era: 3.26, hr9: 0.9 }, last7: { era: 2.45, hr9: 0.7 } },
+  'pablo-lopez': { id: 'pablo-lopez', name: 'Pablo López', teamId: 'min', throws: 'R', era: 3.87, whip: 1.18, hr9: 1.2, hrFbRate: 0.118, kPer9: 9.4, bbPer9: 2.8, fbPct: 44.1, avgFastballVelo: 93.1, season: { gamesStarted: 3, innings: 17.0, era: 4.24, hr9: 1.4 }, last7: { era: 3.60, hr9: 1.1 } },
+  'blake-snell': { id: 'blake-snell', name: 'Blake Snell', teamId: 'sf', throws: 'L', era: 4.21, whip: 1.31, hr9: 1.1, hrFbRate: 0.112, kPer9: 10.8, bbPer9: 4.2, fbPct: 38.7, avgFastballVelo: 92.8, season: { gamesStarted: 3, innings: 15.2, era: 4.88, hr9: 1.3 }, last7: { era: 3.86, hr9: 0.9 } },
+  'freddy-peralta': { id: 'freddy-peralta', name: 'Freddy Peralta', teamId: 'lad', throws: 'R', era: 3.54, whip: 1.09, hr9: 1.0, hrFbRate: 0.103, kPer9: 12.1, bbPer9: 2.6, fbPct: 41.2, avgFastballVelo: 94.7, season: { gamesStarted: 3, innings: 18.0, era: 3.00, hr9: 0.5 }, last7: { era: 2.25, hr9: 0.5 } },
+  'logan-webb': { id: 'logan-webb', name: 'Logan Webb', teamId: 'sf', throws: 'R', era: 2.89, whip: 0.98, hr9: 0.7, hrFbRate: 0.071, kPer9: 8.6, bbPer9: 1.8, fbPct: 35.4, avgFastballVelo: 91.3, season: { gamesStarted: 3, innings: 20.2, era: 2.18, hr9: 0.4 }, last7: { era: 1.80, hr9: 0.4 } },
+  'kyle-bradish': { id: 'kyle-bradish', name: 'Kyle Bradish', teamId: 'tex', throws: 'R', era: 3.98, whip: 1.21, hr9: 1.3, hrFbRate: 0.131, kPer9: 9.8, bbPer9: 3.1, fbPct: 46.8, avgFastballVelo: 95.2, season: { gamesStarted: 3, innings: 16.1, era: 4.41, hr9: 1.6 }, last7: { era: 5.40, hr9: 2.2 } },
+  'hunter-brown': { id: 'hunter-brown', name: 'Hunter Brown', teamId: 'hou', throws: 'R', era: 3.67, whip: 1.14, hr9: 1.1, hrFbRate: 0.109, kPer9: 10.3, bbPer9: 2.9, fbPct: 48.2, avgFastballVelo: 96.8, season: { gamesStarted: 3, innings: 18.2, era: 2.89, hr9: 0.5 }, last7: { era: 2.45, hr9: 0.5 } },
+  'brayan-bello': { id: 'brayan-bello', name: 'Brayan Bello', teamId: 'bos', throws: 'R', era: 4.12, whip: 1.28, hr9: 1.4, hrFbRate: 0.142, kPer9: 8.9, bbPer9: 3.4, fbPct: 49.6, avgFastballVelo: 95.9, season: { gamesStarted: 3, innings: 15.1, era: 5.28, hr9: 1.9 }, last7: { era: 6.00, hr9: 2.4 } },
+  'luis-castillo': { id: 'luis-castillo', name: 'Luis Castillo', teamId: 'sea', throws: 'R', era: 3.01, whip: 1.02, hr9: 0.8, hrFbRate: 0.082, kPer9: 10.7, bbPer9: 2.3, fbPct: 43.5, avgFastballVelo: 97.1, season: { gamesStarted: 3, innings: 19.0, era: 2.37, hr9: 0.5 }, last7: { era: 1.93, hr9: 0.5 } },
+  'zack-wheeler': { id: 'zack-wheeler', name: 'Zack Wheeler', teamId: 'phi', throws: 'R', era: 2.78, whip: 0.96, hr9: 0.8, hrFbRate: 0.081, kPer9: 10.9, bbPer9: 1.9, fbPct: 50.1, avgFastballVelo: 97.4, season: { gamesStarted: 3, innings: 21.0, era: 2.14, hr9: 0.4 }, last7: { era: 1.50, hr9: 0.0 } },
+  'max-fried': { id: 'max-fried', name: 'Max Fried', teamId: 'nyy', throws: 'L', era: 3.44, whip: 1.12, hr9: 0.9, hrFbRate: 0.093, kPer9: 9.1, bbPer9: 2.4, fbPct: 40.8, avgFastballVelo: 93.6, season: { gamesStarted: 3, innings: 17.2, era: 3.57, hr9: 1.0 }, last7: { era: 4.50, hr9: 1.5 } },
+  'spencer-strider': { id: 'spencer-strider', name: 'Spencer Strider', teamId: 'atl', throws: 'R', era: 2.95, whip: 0.98, hr9: 1.0, hrFbRate: 0.103, kPer9: 13.8, bbPer9: 2.2, fbPct: 55.4, avgFastballVelo: 98.6, season: { gamesStarted: 3, innings: 18.1, era: 2.95, hr9: 1.0 }, last7: { era: 2.45, hr9: 0.5 } },
+  'jose-berrios': { id: 'jose-berrios', name: 'José Berríos', teamId: 'tb', throws: 'R', era: 4.21, whip: 1.26, hr9: 1.3, hrFbRate: 0.128, kPer9: 8.7, bbPer9: 2.7, fbPct: 45.3, avgFastballVelo: 93.8, season: { gamesStarted: 3, innings: 16.0, era: 4.50, hr9: 1.7 }, last7: { era: 5.14, hr9: 2.1 } },
+  'cal-quantrill': { id: 'cal-quantrill', name: 'Cal Quantrill', teamId: 'col', throws: 'R', era: 5.12, whip: 1.42, hr9: 1.8, hrFbRate: 0.178, kPer9: 7.4, bbPer9: 3.1, fbPct: 43.2, avgFastballVelo: 92.4, season: { gamesStarted: 3, innings: 14.1, era: 6.28, hr9: 2.5 }, last7: { era: 7.71, hr9: 3.1 } },
+  'matthew-boyd': { id: 'matthew-boyd', name: 'Matthew Boyd', teamId: 'det', throws: 'L', era: 4.44, whip: 1.33, hr9: 1.5, hrFbRate: 0.152, kPer9: 8.3, bbPer9: 3.0, fbPct: 41.7, avgFastballVelo: 91.2, season: { gamesStarted: 3, innings: 15.0, era: 5.40, hr9: 1.8 }, last7: { era: 6.00, hr9: 2.0 } },
+  'marcus-stroman': { id: 'marcus-stroman', name: 'Marcus Stroman', teamId: 'chc', throws: 'R', era: 3.78, whip: 1.19, hr9: 0.8, hrFbRate: 0.082, kPer9: 7.8, bbPer9: 2.6, fbPct: 36.4, avgFastballVelo: 91.7, season: { gamesStarted: 3, innings: 17.1, era: 3.12, hr9: 0.5 }, last7: { era: 2.70, hr9: 0.5 } },
+};
+
+export const BATTERS: Record<string, Batter> = {
+  'cal-raleigh': {
+    id: 'cal-raleigh', name: 'Cal Raleigh', teamId: 'sea', position: 'C', bats: 'S', lineupSpot: 5, jerseyNumber: 29, age: 27,
+    season: { avg: 0.241, obp: 0.318, slg: 0.512, ops: 0.830, hr: 4, rbi: 11, games: 6, iso: 0.271 },
+    statcast: { barrelRate: 18.4, exitVelocityAvg: 92.8, launchAngleAvg: 16.2, hardHitRate: 54.3, xSlugging: 0.534, xwOBA: 0.372, sweetSpotPct: 34.1, pullRate: 42.1, flyBallRate: 44.8, hrFbRate: 0.214 },
+    splits: { vsLeft: { avg: 0.262, obp: 0.338, slg: 0.548, hr: 12, pa: 180 }, vsRight: { avg: 0.228, obp: 0.301, slg: 0.481, hr: 48, pa: 520 } },
+    last7: { avg: 0.286, hr: 2, ops: 0.924 }, last14: { avg: 0.271, hr: 3, ops: 0.891 }, last30: { avg: 0.255, hr: 4, ops: 0.862 },
+    recentGameLog: [
+      { date: 'Apr 3', opponent: 'HOU', ab: 4, h: 2, hr: 1, rbi: 2, bb: 0, k: 1, ops: 1.250 },
+      { date: 'Apr 2', opponent: 'HOU', ab: 3, h: 1, hr: 0, rbi: 1, bb: 1, k: 1, ops: 0.750 },
+      { date: 'Apr 1', opponent: 'HOU', ab: 4, h: 1, hr: 1, rbi: 3, bb: 0, k: 2, ops: 1.000 },
+      { date: 'Mar 31', opponent: 'TEX', ab: 4, h: 0, hr: 0, rbi: 0, bb: 0, k: 2, ops: 0.000 },
+      { date: 'Mar 30', opponent: 'TEX', ab: 3, h: 2, hr: 0, rbi: 1, bb: 1, k: 0, ops: 1.167 },
+      { date: 'Mar 29', opponent: 'TEX', ab: 4, h: 2, hr: 2, rbi: 4, bb: 0, k: 1, ops: 1.750 },
+      { date: 'Mar 28', opponent: 'OAK', ab: 4, h: 1, hr: 0, rbi: 0, bb: 1, k: 2, ops: 0.625 },
+      { date: 'Mar 27', opponent: 'OAK', ab: 3, h: 2, hr: 1, rbi: 2, bb: 0, k: 0, ops: 1.333 },
+    ]
+  },
+  'kyle-schwarber': {
+    id: 'kyle-schwarber', name: 'Kyle Schwarber', teamId: 'phi', position: 'LF', bats: 'L', lineupSpot: 1, jerseyNumber: 12, age: 32,
+    season: { avg: 0.228, obp: 0.364, slg: 0.544, ops: 0.908, hr: 5, rbi: 9, games: 6, iso: 0.316 },
+    statcast: { barrelRate: 21.2, exitVelocityAvg: 94.1, launchAngleAvg: 18.8, hardHitRate: 57.8, xSlugging: 0.562, xwOBA: 0.398, sweetSpotPct: 36.4, pullRate: 48.3, flyBallRate: 48.2, hrFbRate: 0.248 },
+    splits: { vsLeft: { avg: 0.198, obp: 0.312, slg: 0.442, hr: 8, pa: 120 }, vsRight: { avg: 0.238, obp: 0.381, slg: 0.572, hr: 42, pa: 480 } },
+    last7: { avg: 0.261, hr: 3, ops: 1.024 }, last14: { avg: 0.244, hr: 4, ops: 0.964 }, last30: { avg: 0.232, hr: 5, ops: 0.921 },
+    recentGameLog: [
+      { date: 'Apr 3', opponent: 'ATL', ab: 4, h: 2, hr: 1, rbi: 2, bb: 1, k: 1, ops: 1.200 },
+      { date: 'Apr 2', opponent: 'ATL', ab: 4, h: 1, hr: 1, rbi: 3, bb: 0, k: 2, ops: 1.000 },
+      { date: 'Apr 1', opponent: 'ATL', ab: 3, h: 1, hr: 0, rbi: 0, bb: 2, k: 1, ops: 0.833 },
+      { date: 'Mar 31', opponent: 'MIA', ab: 4, h: 2, hr: 1, rbi: 2, bb: 0, k: 1, ops: 1.250 },
+      { date: 'Mar 30', opponent: 'MIA', ab: 4, h: 0, hr: 0, rbi: 0, bb: 1, k: 3, ops: 0.250 },
+      { date: 'Mar 29', opponent: 'MIA', ab: 3, h: 2, hr: 2, rbi: 5, bb: 1, k: 0, ops: 2.000 },
+      { date: 'Mar 28', opponent: 'WSH', ab: 4, h: 1, hr: 0, rbi: 1, bb: 0, k: 2, ops: 0.500 },
+      { date: 'Mar 27', opponent: 'WSH', ab: 4, h: 2, hr: 0, rbi: 0, bb: 1, k: 1, ops: 0.875 },
+    ]
+  },
+  'aaron-judge': {
+    id: 'aaron-judge', name: 'Aaron Judge', teamId: 'nyy', position: 'RF', bats: 'R', lineupSpot: 3, jerseyNumber: 99, age: 33,
+    season: { avg: 0.298, obp: 0.412, slg: 0.618, ops: 1.030, hr: 5, rbi: 12, games: 6, iso: 0.320 },
+    statcast: { barrelRate: 24.8, exitVelocityAvg: 96.2, launchAngleAvg: 17.4, hardHitRate: 62.1, xSlugging: 0.641, xwOBA: 0.432, sweetSpotPct: 38.2, pullRate: 44.8, flyBallRate: 46.3, hrFbRate: 0.284 },
+    splits: { vsLeft: { avg: 0.312, obp: 0.428, slg: 0.648, hr: 18, pa: 220 }, vsRight: { avg: 0.288, obp: 0.401, slg: 0.601, hr: 47, pa: 520 } },
+    last7: { avg: 0.318, hr: 3, ops: 1.124 }, last14: { avg: 0.304, hr: 4, ops: 1.062 }, last30: { avg: 0.291, hr: 5, ops: 1.024 },
+    recentGameLog: [
+      { date: 'Apr 3', opponent: 'BOS', ab: 4, h: 2, hr: 1, rbi: 3, bb: 1, k: 0, ops: 1.400 },
+      { date: 'Apr 2', opponent: 'BOS', ab: 4, h: 1, hr: 1, rbi: 2, bb: 0, k: 1, ops: 1.000 },
+      { date: 'Apr 1', opponent: 'BOS', ab: 3, h: 2, hr: 0, rbi: 1, bb: 2, k: 0, ops: 1.333 },
+      { date: 'Mar 31', opponent: 'MIN', ab: 4, h: 1, hr: 1, rbi: 2, bb: 0, k: 2, ops: 1.000 },
+      { date: 'Mar 30', opponent: 'MIN', ab: 4, h: 0, hr: 0, rbi: 0, bb: 1, k: 2, ops: 0.250 },
+      { date: 'Mar 29', opponent: 'MIN', ab: 3, h: 2, hr: 2, rbi: 4, bb: 1, k: 0, ops: 2.000 },
+      { date: 'Mar 28', opponent: 'DET', ab: 4, h: 2, hr: 0, rbi: 1, bb: 0, k: 1, ops: 1.000 },
+      { date: 'Mar 27', opponent: 'DET', ab: 4, h: 2, hr: 1, rbi: 3, bb: 0, k: 1, ops: 1.250 },
+    ]
+  },
+  'rafael-devers': {
+    id: 'rafael-devers', name: 'Rafael Devers', teamId: 'sf', position: '3B', bats: 'L', lineupSpot: 4, jerseyNumber: 11, age: 28,
+    season: { avg: 0.276, obp: 0.338, slg: 0.524, ops: 0.862, hr: 3, rbi: 8, games: 6, iso: 0.248 },
+    statcast: { barrelRate: 16.8, exitVelocityAvg: 93.4, launchAngleAvg: 14.8, hardHitRate: 52.6, xSlugging: 0.512, xwOBA: 0.358, sweetSpotPct: 32.8, pullRate: 46.2, flyBallRate: 38.4, hrFbRate: 0.198 },
+    splits: { vsLeft: { avg: 0.244, obp: 0.308, slg: 0.468, hr: 9, pa: 180 }, vsRight: { avg: 0.288, obp: 0.352, slg: 0.548, hr: 21, pa: 420 } },
+    last7: { avg: 0.292, hr: 2, ops: 0.924 }, last14: { avg: 0.278, hr: 2, ops: 0.882 }, last30: { avg: 0.271, hr: 3, ops: 0.858 },
+    recentGameLog: [
+      { date: 'Apr 3', opponent: 'LAD', ab: 4, h: 2, hr: 1, rbi: 2, bb: 0, k: 1, ops: 1.250 },
+      { date: 'Apr 2', opponent: 'LAD', ab: 3, h: 1, hr: 0, rbi: 0, bb: 1, k: 1, ops: 0.750 },
+      { date: 'Apr 1', opponent: 'LAD', ab: 4, h: 1, hr: 1, rbi: 3, bb: 0, k: 2, ops: 1.000 },
+      { date: 'Mar 31', opponent: 'SD', ab: 4, h: 2, hr: 0, rbi: 1, bb: 0, k: 1, ops: 1.000 },
+      { date: 'Mar 30', opponent: 'SD', ab: 3, h: 0, hr: 0, rbi: 0, bb: 1, k: 2, ops: 0.333 },
+      { date: 'Mar 29', opponent: 'SD', ab: 4, h: 2, hr: 1, rbi: 2, bb: 0, k: 1, ops: 1.250 },
+      { date: 'Mar 28', opponent: 'ARI', ab: 4, h: 1, hr: 0, rbi: 0, bb: 0, k: 2, ops: 0.500 },
+      { date: 'Mar 27', opponent: 'ARI', ab: 3, h: 2, hr: 1, rbi: 3, bb: 1, k: 0, ops: 1.667 },
+    ]
+  },
+  'yordan-alvarez': {
+    id: 'yordan-alvarez', name: 'Yordan Alvarez', teamId: 'hou', position: 'DH', bats: 'L', lineupSpot: 4, jerseyNumber: 44, age: 27,
+    season: { avg: 0.312, obp: 0.408, slg: 0.602, ops: 1.010, hr: 4, rbi: 13, games: 6, iso: 0.290 },
+    statcast: { barrelRate: 22.6, exitVelocityAvg: 95.8, launchAngleAvg: 19.2, hardHitRate: 60.4, xSlugging: 0.618, xwOBA: 0.418, sweetSpotPct: 37.8, pullRate: 41.2, flyBallRate: 45.1, hrFbRate: 0.238 },
+    splits: { vsLeft: { avg: 0.288, obp: 0.378, slg: 0.558, hr: 14, pa: 210 }, vsRight: { avg: 0.322, obp: 0.421, slg: 0.624, hr: 38, pa: 490 } },
+    last7: { avg: 0.333, hr: 2, ops: 1.082 }, last14: { avg: 0.318, hr: 3, ops: 1.024 }, last30: { avg: 0.308, hr: 4, ops: 0.994 },
+    recentGameLog: [
+      { date: 'Apr 3', opponent: 'SEA', ab: 4, h: 2, hr: 1, rbi: 3, bb: 1, k: 0, ops: 1.400 },
+      { date: 'Apr 2', opponent: 'SEA', ab: 3, h: 2, hr: 0, rbi: 1, bb: 1, k: 0, ops: 1.333 },
+      { date: 'Apr 1', opponent: 'SEA', ab: 4, h: 1, hr: 1, rbi: 2, bb: 0, k: 2, ops: 1.000 },
+      { date: 'Mar 31', opponent: 'TEX', ab: 4, h: 2, hr: 0, rbi: 1, bb: 0, k: 1, ops: 1.000 },
+      { date: 'Mar 30', opponent: 'TEX', ab: 3, h: 1, hr: 1, rbi: 3, bb: 2, k: 1, ops: 1.333 },
+      { date: 'Mar 29', opponent: 'TEX', ab: 4, h: 2, hr: 1, rbi: 2, bb: 0, k: 1, ops: 1.250 },
+      { date: 'Mar 28', opponent: 'LAA', ab: 4, h: 0, hr: 0, rbi: 0, bb: 1, k: 2, ops: 0.250 },
+      { date: 'Mar 27', opponent: 'LAA', ab: 3, h: 2, hr: 2, rbi: 4, bb: 0, k: 0, ops: 2.000 },
+    ]
+  },
+  'pete-alonso': {
+    id: 'pete-alonso', name: 'Pete Alonso', teamId: 'min', position: '1B', bats: 'R', lineupSpot: 3, jerseyNumber: 20, age: 30,
+    season: { avg: 0.248, obp: 0.328, slg: 0.498, ops: 0.826, hr: 3, rbi: 10, games: 6, iso: 0.250 },
+    statcast: { barrelRate: 17.4, exitVelocityAvg: 93.8, launchAngleAvg: 15.6, hardHitRate: 55.2, xSlugging: 0.521, xwOBA: 0.362, sweetSpotPct: 33.4, pullRate: 43.8, flyBallRate: 41.2, hrFbRate: 0.208 },
+    splits: { vsLeft: { avg: 0.268, obp: 0.348, slg: 0.528, hr: 12, pa: 195 }, vsRight: { avg: 0.238, obp: 0.318, slg: 0.478, hr: 28, pa: 445 } },
+    last7: { avg: 0.261, hr: 2, ops: 0.874 }, last14: { avg: 0.254, hr: 2, ops: 0.848 }, last30: { avg: 0.248, hr: 3, ops: 0.826 },
+    recentGameLog: [
+      { date: 'Apr 3', opponent: 'DET', ab: 4, h: 2, hr: 1, rbi: 2, bb: 0, k: 1, ops: 1.250 },
+      { date: 'Apr 2', opponent: 'DET', ab: 4, h: 1, hr: 0, rbi: 1, bb: 1, k: 2, ops: 0.625 },
+      { date: 'Apr 1', opponent: 'DET', ab: 3, h: 1, hr: 1, rbi: 3, bb: 0, k: 1, ops: 1.333 },
+      { date: 'Mar 31', opponent: 'NYY', ab: 4, h: 0, hr: 0, rbi: 0, bb: 1, k: 3, ops: 0.250 },
+      { date: 'Mar 30', opponent: 'NYY', ab: 4, h: 2, hr: 0, rbi: 1, bb: 0, k: 1, ops: 1.000 },
+      { date: 'Mar 29', opponent: 'NYY', ab: 3, h: 2, hr: 1, rbi: 2, bb: 1, k: 0, ops: 1.667 },
+      { date: 'Mar 28', opponent: 'CLE', ab: 4, h: 1, hr: 0, rbi: 0, bb: 0, k: 2, ops: 0.500 },
+      { date: 'Mar 27', opponent: 'CLE', ab: 4, h: 2, hr: 2, rbi: 4, bb: 0, k: 1, ops: 1.750 },
+    ]
+  },
+  'freddie-freeman': {
+    id: 'freddie-freeman', name: 'Freddie Freeman', teamId: 'lad', position: '1B', bats: 'L', lineupSpot: 3, jerseyNumber: 5, age: 36,
+    season: { avg: 0.322, obp: 0.408, slg: 0.534, ops: 0.942, hr: 2, rbi: 9, games: 6, iso: 0.212 },
+    statcast: { barrelRate: 14.2, exitVelocityAvg: 91.8, launchAngleAvg: 12.4, hardHitRate: 50.8, xSlugging: 0.498, xwOBA: 0.348, sweetSpotPct: 30.2, pullRate: 38.4, flyBallRate: 36.8, hrFbRate: 0.162 },
+    splits: { vsLeft: { avg: 0.298, obp: 0.378, slg: 0.498, hr: 8, pa: 190 }, vsRight: { avg: 0.334, obp: 0.421, slg: 0.552, hr: 24, pa: 460 } },
+    last7: { avg: 0.348, hr: 1, ops: 1.008 }, last14: { avg: 0.334, hr: 1, ops: 0.972 }, last30: { avg: 0.321, hr: 2, ops: 0.942 },
+    recentGameLog: [
+      { date: 'Apr 3', opponent: 'SF', ab: 4, h: 2, hr: 1, rbi: 2, bb: 0, k: 0, ops: 1.250 },
+      { date: 'Apr 2', opponent: 'SF', ab: 4, h: 2, hr: 0, rbi: 1, bb: 1, k: 0, ops: 1.125 },
+      { date: 'Apr 1', opponent: 'SF', ab: 3, h: 1, hr: 0, rbi: 0, bb: 2, k: 1, ops: 0.833 },
+      { date: 'Mar 31', opponent: 'COL', ab: 4, h: 2, hr: 1, rbi: 3, bb: 0, k: 0, ops: 1.250 },
+      { date: 'Mar 30', opponent: 'COL', ab: 4, h: 1, hr: 0, rbi: 0, bb: 1, k: 1, ops: 0.625 },
+      { date: 'Mar 29', opponent: 'COL', ab: 3, h: 2, hr: 0, rbi: 1, bb: 1, k: 0, ops: 1.333 },
+      { date: 'Mar 28', opponent: 'SD', ab: 4, h: 2, hr: 0, rbi: 1, bb: 0, k: 1, ops: 1.000 },
+      { date: 'Mar 27', opponent: 'SD', ab: 3, h: 1, hr: 0, rbi: 0, bb: 1, k: 1, ops: 0.750 },
+    ]
+  },
+  'matt-olson': {
+    id: 'matt-olson', name: 'Matt Olson', teamId: 'atl', position: '1B', bats: 'L', lineupSpot: 4, jerseyNumber: 28, age: 31,
+    season: { avg: 0.238, obp: 0.332, slg: 0.508, ops: 0.840, hr: 4, rbi: 11, games: 6, iso: 0.270 },
+    statcast: { barrelRate: 18.8, exitVelocityAvg: 93.2, launchAngleAvg: 17.2, hardHitRate: 54.8, xSlugging: 0.528, xwOBA: 0.368, sweetSpotPct: 34.8, pullRate: 44.1, flyBallRate: 42.6, hrFbRate: 0.218 },
+    splits: { vsLeft: { avg: 0.212, obp: 0.308, slg: 0.468, hr: 10, pa: 180 }, vsRight: { avg: 0.248, obp: 0.342, slg: 0.528, hr: 30, pa: 460 } },
+    last7: { avg: 0.254, hr: 2, ops: 0.892 }, last14: { avg: 0.242, hr: 3, ops: 0.862 }, last30: { avg: 0.238, hr: 4, ops: 0.840 },
+    recentGameLog: [
+      { date: 'Apr 3', opponent: 'PHI', ab: 4, h: 1, hr: 1, rbi: 2, bb: 1, k: 1, ops: 1.000 },
+      { date: 'Apr 2', opponent: 'PHI', ab: 4, h: 2, hr: 0, rbi: 1, bb: 0, k: 1, ops: 1.000 },
+      { date: 'Apr 1', opponent: 'PHI', ab: 3, h: 0, hr: 0, rbi: 0, bb: 1, k: 2, ops: 0.333 },
+      { date: 'Mar 31', opponent: 'MIA', ab: 4, h: 2, hr: 1, rbi: 3, bb: 0, k: 0, ops: 1.250 },
+      { date: 'Mar 30', opponent: 'MIA', ab: 4, h: 1, hr: 1, rbi: 2, bb: 0, k: 2, ops: 1.000 },
+      { date: 'Mar 29', opponent: 'MIA', ab: 3, h: 2, hr: 1, rbi: 2, bb: 1, k: 0, ops: 1.667 },
+      { date: 'Mar 28', opponent: 'WSH', ab: 4, h: 1, hr: 0, rbi: 0, bb: 0, k: 2, ops: 0.500 },
+      { date: 'Mar 27', opponent: 'WSH', ab: 4, h: 2, hr: 0, rbi: 1, bb: 0, k: 1, ops: 1.000 },
+    ]
+  },
+  'bryce-harper': {
+    id: 'bryce-harper', name: 'Bryce Harper', teamId: 'phi', position: '1B', bats: 'L', lineupSpot: 4, jerseyNumber: 3, age: 33,
+    season: { avg: 0.291, obp: 0.398, slg: 0.558, ops: 0.956, hr: 4, rbi: 10, games: 6, iso: 0.267 },
+    statcast: { barrelRate: 19.8, exitVelocityAvg: 94.4, launchAngleAvg: 16.8, hardHitRate: 58.2, xSlugging: 0.548, xwOBA: 0.388, sweetSpotPct: 35.8, pullRate: 42.8, flyBallRate: 43.4, hrFbRate: 0.228 },
+    splits: { vsLeft: { avg: 0.268, obp: 0.368, slg: 0.518, hr: 11, pa: 200 }, vsRight: { avg: 0.302, obp: 0.412, slg: 0.578, hr: 33, pa: 480 } },
+    last7: { avg: 0.308, hr: 2, ops: 1.024 }, last14: { avg: 0.296, hr: 3, ops: 0.982 }, last30: { avg: 0.288, hr: 4, ops: 0.954 },
+    recentGameLog: [
+      { date: 'Apr 3', opponent: 'ATL', ab: 4, h: 2, hr: 1, rbi: 2, bb: 1, k: 0, ops: 1.400 },
+      { date: 'Apr 2', opponent: 'ATL', ab: 3, h: 1, hr: 1, rbi: 3, bb: 1, k: 1, ops: 1.333 },
+      { date: 'Apr 1', opponent: 'ATL', ab: 4, h: 1, hr: 0, rbi: 0, bb: 0, k: 2, ops: 0.500 },
+      { date: 'Mar 31', opponent: 'MIA', ab: 4, h: 2, hr: 1, rbi: 2, bb: 0, k: 1, ops: 1.250 },
+      { date: 'Mar 30', opponent: 'MIA', ab: 3, h: 0, hr: 0, rbi: 0, bb: 2, k: 1, ops: 0.667 },
+      { date: 'Mar 29', opponent: 'MIA', ab: 4, h: 2, hr: 1, rbi: 3, bb: 0, k: 1, ops: 1.250 },
+      { date: 'Mar 28', opponent: 'WSH', ab: 4, h: 2, hr: 0, rbi: 1, bb: 0, k: 0, ops: 1.000 },
+      { date: 'Mar 27', opponent: 'WSH', ab: 3, h: 1, hr: 0, rbi: 0, bb: 1, k: 1, ops: 0.750 },
+    ]
+  },
+  'corey-seager': {
+    id: 'corey-seager', name: 'Corey Seager', teamId: 'tex', position: 'SS', bats: 'L', lineupSpot: 3, jerseyNumber: 5, age: 31,
+    season: { avg: 0.268, obp: 0.348, slg: 0.518, ops: 0.866, hr: 3, rbi: 8, games: 6, iso: 0.250 },
+    statcast: { barrelRate: 15.8, exitVelocityAvg: 92.6, launchAngleAvg: 15.4, hardHitRate: 51.4, xSlugging: 0.508, xwOBA: 0.352, sweetSpotPct: 31.8, pullRate: 40.2, flyBallRate: 40.8, hrFbRate: 0.188 },
+    splits: { vsLeft: { avg: 0.244, obp: 0.318, slg: 0.478, hr: 9, pa: 185 }, vsRight: { avg: 0.278, obp: 0.362, slg: 0.538, hr: 21, pa: 435 } },
+    last7: { avg: 0.281, hr: 2, ops: 0.924 }, last14: { avg: 0.271, hr: 2, ops: 0.884 }, last30: { avg: 0.265, hr: 3, ops: 0.862 },
+    recentGameLog: [
+      { date: 'Apr 3', opponent: 'HOU', ab: 4, h: 2, hr: 1, rbi: 2, bb: 0, k: 1, ops: 1.250 },
+      { date: 'Apr 2', opponent: 'HOU', ab: 4, h: 1, hr: 0, rbi: 0, bb: 1, k: 2, ops: 0.625 },
+      { date: 'Apr 1', opponent: 'HOU', ab: 3, h: 1, hr: 1, rbi: 3, bb: 0, k: 1, ops: 1.333 },
+      { date: 'Mar 31', opponent: 'SEA', ab: 4, h: 0, hr: 0, rbi: 0, bb: 0, k: 2, ops: 0.000 },
+      { date: 'Mar 30', opponent: 'SEA', ab: 3, h: 2, hr: 0, rbi: 1, bb: 1, k: 0, ops: 1.333 },
+      { date: 'Mar 29', opponent: 'SEA', ab: 4, h: 2, hr: 1, rbi: 2, bb: 0, k: 1, ops: 1.250 },
+      { date: 'Mar 28', opponent: 'LAA', ab: 4, h: 1, hr: 0, rbi: 0, bb: 0, k: 2, ops: 0.500 },
+      { date: 'Mar 27', opponent: 'LAA', ab: 3, h: 2, hr: 1, rbi: 3, bb: 1, k: 0, ops: 1.667 },
+    ]
+  },
+};
+
+export const GAMES: Game[] = [
+  {
+    id: 'game-001', date: '2026-04-04', time: '1:05 PM', timeET: '1:05 PM ET', status: 'lineup_confirmed',
+    awayTeamId: 'min', homeTeamId: 'nyy', ballparkId: 'yankee-stadium',
+    awayPitcherId: 'pablo-lopez', homePitcherId: 'gerrit-cole',
+    tvNetwork: 'YES / BSN', lineupStatus: { away: 'confirmed', home: 'confirmed' },
+    weather: { temp: 52, feelsLike: 47, condition: 'Partly Cloudy', windSpeed: 14, windDirection: 'SW', windToward: 'out', precipitation: 5, humidity: 62, visibility: 10, hrImpact: 'positive', hrImpactScore: 6.8 },
+  },
+  {
+    id: 'game-002', date: '2026-04-04', time: '1:35 PM', timeET: '1:35 PM ET', status: 'lineup_confirmed',
+    awayTeamId: 'lad', homeTeamId: 'sf', ballparkId: 'oracle-park',
+    awayPitcherId: 'freddy-peralta', homePitcherId: 'blake-snell',
+    tvNetwork: 'NBCS Bay Area', lineupStatus: { away: 'confirmed', home: 'projected' },
+    weather: { temp: 58, feelsLike: 54, condition: 'Overcast', windSpeed: 18, windDirection: 'W', windToward: 'in', precipitation: 12, humidity: 78, visibility: 8, hrImpact: 'negative', hrImpactScore: 3.2 },
+  },
+  {
+    id: 'game-003', date: '2026-04-04', time: '2:10 PM', timeET: '2:10 PM ET', status: 'lineup_confirmed',
+    awayTeamId: 'atl', homeTeamId: 'phi', ballparkId: 'citizens-bank',
+    awayPitcherId: 'spencer-strider', homePitcherId: 'zack-wheeler',
+    tvNetwork: 'NBCS Philly', lineupStatus: { away: 'confirmed', home: 'confirmed' },
+    weather: { temp: 61, feelsLike: 58, condition: 'Sunny', windSpeed: 9, windDirection: 'SW', windToward: 'out', precipitation: 0, humidity: 48, visibility: 10, hrImpact: 'positive', hrImpactScore: 7.4 },
+  },
+  {
+    id: 'game-004', date: '2026-04-04', time: '3:05 PM', timeET: '3:05 PM ET', status: 'scheduled',
+    awayTeamId: 'sea', homeTeamId: 'hou', ballparkId: 'minute-maid',
+    awayPitcherId: 'luis-castillo', homePitcherId: 'hunter-brown',
+    tvNetwork: 'ESPN', lineupStatus: { away: 'projected', home: 'projected' },
+    weather: { temp: 74, feelsLike: 72, condition: 'Clear', windSpeed: 6, windDirection: 'SE', windToward: 'neutral', precipitation: 0, humidity: 55, visibility: 10, hrImpact: 'neutral', hrImpactScore: 5.2 },
+  },
+  {
+    id: 'game-005', date: '2026-04-04', time: '4:05 PM', timeET: '4:05 PM ET', status: 'scheduled',
+    awayTeamId: 'bos', homeTeamId: 'nyy', ballparkId: 'yankee-stadium',
+    awayPitcherId: 'brayan-bello', homePitcherId: 'max-fried',
+    tvNetwork: 'ESPN2', lineupStatus: { away: 'projected', home: 'projected' },
+    weather: { temp: 54, feelsLike: 49, condition: 'Partly Cloudy', windSpeed: 12, windDirection: 'NE', windToward: 'in', precipitation: 8, humidity: 66, visibility: 9, hrImpact: 'neutral', hrImpactScore: 4.8 },
+  },
+  {
+    id: 'game-006', date: '2026-04-04', time: '7:08 PM', timeET: '7:08 PM ET', status: 'scheduled',
+    awayTeamId: 'cin', homeTeamId: 'col', ballparkId: 'coors-field',
+    awayPitcherId: 'marcus-stroman', homePitcherId: 'cal-quantrill',
+    tvNetwork: 'Apple TV+', lineupStatus: { away: 'unknown', home: 'unknown' },
+    weather: { temp: 68, feelsLike: 64, condition: 'Clear', windSpeed: 8, windDirection: 'SW', windToward: 'out', precipitation: 0, humidity: 38, visibility: 10, hrImpact: 'positive', hrImpactScore: 9.1 },
+  },
+  {
+    id: 'game-007', date: '2026-04-04', time: '7:40 PM', timeET: '7:40 PM ET', status: 'scheduled',
+    awayTeamId: 'det', homeTeamId: 'min', ballparkId: 'target-field',
+    awayPitcherId: 'matthew-boyd', homePitcherId: 'pablo-lopez',
+    tvNetwork: 'BSN', lineupStatus: { away: 'projected', home: 'projected' },
+    weather: { temp: 44, feelsLike: 38, condition: 'Windy', windSpeed: 22, windDirection: 'N', windToward: 'in', precipitation: 0, humidity: 52, visibility: 10, hrImpact: 'negative', hrImpactScore: 2.8 },
+  },
+  {
+    id: 'game-008', date: '2026-04-04', time: '8:10 PM', timeET: '8:10 PM ET', status: 'scheduled',
+    awayTeamId: 'tb', homeTeamId: 'tex', ballparkId: 'globe-life',
+    awayPitcherId: 'jose-berrios', homePitcherId: 'kyle-bradish',
+    tvNetwork: 'Bally Sports', lineupStatus: { away: 'unknown', home: 'projected' },
+    weather: { temp: 78, feelsLike: 76, condition: 'Clear', windSpeed: 7, windDirection: 'S', windToward: 'out', precipitation: 0, humidity: 44, visibility: 10, hrImpact: 'positive', hrImpactScore: 8.2 },
+  },
+];
+
+export const HR_PROJECTIONS: HRProjection[] = [
+  { id: 'proj-001', batterId: 'aaron-judge', gameId: 'game-001', opposingPitcherId: 'pablo-lopez', ballparkId: 'yankee-stadium', hrProbability: 28.4, confidenceTier: 'elite', platoonAdvantage: 'strong', parkFactorBoost: 1.18, weatherImpact: 1.08, formMultiplier: 1.14, matchupScore: 88, projectedAtBats: 3.8, keyFactors: ['Platoon edge vs RHP', 'Yankee Stadium HR factor 1.18x', 'Lopez HR/FB 11.8%', 'SW wind 14 mph blowing out', '7-day hot streak'], rank: 1 },
+  { id: 'proj-002', batterId: 'kyle-schwarber', gameId: 'game-003', opposingPitcherId: 'spencer-strider', ballparkId: 'citizens-bank', hrProbability: 24.7, confidenceTier: 'elite', platoonAdvantage: 'neutral', parkFactorBoost: 1.22, weatherImpact: 1.06, formMultiplier: 1.18, matchupScore: 82, projectedAtBats: 4.1, keyFactors: ['Citizens Bank HR factor 1.22x', 'Barrel rate 21.2%', 'Sunny 61°F ideal conditions', 'Strider high FB% 55.4%', '5 HR in 6 games'], rank: 2 },
+  { id: 'proj-003', batterId: 'yordan-alvarez', gameId: 'game-004', opposingPitcherId: 'luis-castillo', ballparkId: 'minute-maid', hrProbability: 22.1, confidenceTier: 'high', platoonAdvantage: 'moderate', parkFactorBoost: 1.06, weatherImpact: 1.02, formMultiplier: 1.12, matchupScore: 76, projectedAtBats: 4.0, keyFactors: ['Exit velo 95.8 mph avg', 'Alvarez vs RHP .322/.421/.624', 'Batting cleanup 4-spot', 'Castillo 0.8 HR/9 but high velo'], rank: 3 },
+  { id: 'proj-004', batterId: 'bryce-harper', gameId: 'game-003', opposingPitcherId: 'spencer-strider', ballparkId: 'citizens-bank', hrProbability: 21.8, confidenceTier: 'high', platoonAdvantage: 'neutral', parkFactorBoost: 1.22, weatherImpact: 1.06, formMultiplier: 1.10, matchupScore: 78, projectedAtBats: 4.2, keyFactors: ['Citizens Bank HR factor 1.22x', 'Barrel rate 19.8%', 'Batting cleanup, 4.2 PA projected', 'Harper 4 HR in 6 games'], rank: 4 },
+  { id: 'proj-005', batterId: 'cal-raleigh', gameId: 'game-004', opposingPitcherId: 'hunter-brown', ballparkId: 'minute-maid', hrProbability: 19.6, confidenceTier: 'high', platoonAdvantage: 'moderate', parkFactorBoost: 1.06, weatherImpact: 1.02, formMultiplier: 1.08, matchupScore: 72, projectedAtBats: 3.6, keyFactors: ['Barrel rate 18.4%', 'Switch hitter vs RHP', 'Brown HR/FB 10.9%', '2 HR in last 7 days'], rank: 5 },
+  { id: 'proj-006', batterId: 'matt-olson', gameId: 'game-003', opposingPitcherId: 'zack-wheeler', ballparkId: 'citizens-bank', hrProbability: 17.3, confidenceTier: 'medium', platoonAdvantage: 'neutral', parkFactorBoost: 1.22, weatherImpact: 1.06, formMultiplier: 1.04, matchupScore: 68, projectedAtBats: 4.0, keyFactors: ['Citizens Bank park factor', 'Olson 4 HR in 6 games', 'Wheeler 0.8 HR/9 — tough matchup', 'Sunny conditions favorable'], rank: 6 },
+  { id: 'proj-007', batterId: 'pete-alonso', gameId: 'game-001', opposingPitcherId: 'gerrit-cole', ballparkId: 'yankee-stadium', hrProbability: 16.8, confidenceTier: 'medium', platoonAdvantage: 'moderate', parkFactorBoost: 1.18, weatherImpact: 1.08, formMultiplier: 1.02, matchupScore: 64, projectedAtBats: 3.8, keyFactors: ['Yankee Stadium HR factor 1.18x', 'SW wind blowing out', 'Cole 0.9 HR/9 manageable', 'Alonso vs LHP splits favorable'], rank: 7 },
+  { id: 'proj-008', batterId: 'rafael-devers', gameId: 'game-002', opposingPitcherId: 'freddy-peralta', ballparkId: 'oracle-park', hrProbability: 14.2, confidenceTier: 'medium', platoonAdvantage: 'moderate', parkFactorBoost: 0.82, weatherImpact: 0.91, formMultiplier: 1.06, matchupScore: 58, projectedAtBats: 3.8, keyFactors: ['Oracle Park suppresses HRs 0.82x', 'W wind blowing in 18 mph', 'Devers vs RHP .288/.352/.548', 'Peralta HR/FB 10.3%'], rank: 8 },
+  { id: 'proj-009', batterId: 'corey-seager', gameId: 'game-008', opposingPitcherId: 'jose-berrios', ballparkId: 'globe-life', hrProbability: 18.9, confidenceTier: 'high', platoonAdvantage: 'moderate', parkFactorBoost: 1.16, weatherImpact: 1.09, formMultiplier: 1.06, matchupScore: 74, projectedAtBats: 4.0, keyFactors: ['Globe Life HR factor 1.16x', 'Berrios HR/FB 12.8%', '78°F clear skies', 'Seager batting 3rd'], rank: 9 },
+  { id: 'proj-010', batterId: 'freddie-freeman', gameId: 'game-002', opposingPitcherId: 'blake-snell', ballparkId: 'oracle-park', hrProbability: 13.4, confidenceTier: 'low', platoonAdvantage: 'moderate', parkFactorBoost: 0.82, weatherImpact: 0.91, formMultiplier: 1.08, matchupScore: 54, projectedAtBats: 4.2, keyFactors: ['Oracle Park HR suppressor', 'Snell throws LHP — moderate split edge', 'Wind blowing in 18 mph from W', 'Freeman xwOBA .348 strong contact'], rank: 10 },
+];
+
+export const PITCH_VULNERABILITIES: PitchTypeVulnerability[] = [
+  { pitchType: '4-Seam Fastball', avgExitVelo: 96.4, hrRate: 0.082, whiffRate: 0.182, baValue: 0.312 },
+  { pitchType: 'Sinker/2-Seam', avgExitVelo: 94.8, hrRate: 0.041, whiffRate: 0.148, baValue: 0.288 },
+  { pitchType: 'Slider', avgExitVelo: 88.2, hrRate: 0.028, whiffRate: 0.342, baValue: 0.218 },
+  { pitchType: 'Curveball', avgExitVelo: 86.4, hrRate: 0.024, whiffRate: 0.298, baValue: 0.204 },
+  { pitchType: 'Changeup', avgExitVelo: 91.6, hrRate: 0.062, whiffRate: 0.264, baValue: 0.268 },
+  { pitchType: 'Cutter', avgExitVelo: 90.2, hrRate: 0.048, whiffRate: 0.224, baValue: 0.242 },
+];
+
+export const TEAM_HR_DATA = [
+  { team: 'PHI', teamId: 'phi', hr2026: 18, hr2025Rate: 1.82, parkFactor: 1.22, color: '#E81828' },
+  { team: 'NYY', teamId: 'nyy', hr2026: 16, hr2025Rate: 1.74, parkFactor: 1.18, color: '#003087' },
+  { team: 'HOU', teamId: 'hou', hr2026: 14, hr2025Rate: 1.58, parkFactor: 1.06, color: '#002D62' },
+  { team: 'ATL', teamId: 'atl', hr2026: 14, hr2025Rate: 1.62, parkFactor: 1.08, color: '#CE1141' },
+  { team: 'SEA', teamId: 'sea', hr2026: 13, hr2025Rate: 1.68, parkFactor: 0.94, color: '#0C2C56' },
+  { team: 'TEX', teamId: 'tex', hr2026: 12, hr2025Rate: 1.54, parkFactor: 1.16, color: '#003278' },
+  { team: 'COL', teamId: 'col', hr2026: 11, hr2025Rate: 1.48, parkFactor: 1.38, color: '#33006F' },
+  { team: 'LAD', teamId: 'lad', hr2026: 10, hr2025Rate: 1.44, parkFactor: 0.98, color: '#005A9C' },
+  { team: 'MIN', teamId: 'min', hr2026: 10, hr2025Rate: 1.38, parkFactor: 0.97, color: '#002B5C' },
+  { team: 'TB',  teamId: 'tb',  hr2026: 9,  hr2025Rate: 1.32, parkFactor: 0.96, color: '#092C5C' },
+  { team: 'CIN', teamId: 'cin', hr2026: 8,  hr2025Rate: 1.28, parkFactor: 1.28, color: '#C6011F' },
+  { team: 'BOS', teamId: 'bos', hr2026: 8,  hr2025Rate: 1.24, parkFactor: 0.92, color: '#BD3039' },
+  { team: 'SF',  teamId: 'sf',  hr2026: 7,  hr2025Rate: 1.18, parkFactor: 0.82, color: '#FD5A1E' },
+  { team: 'DET', teamId: 'det', hr2026: 7,  hr2025Rate: 1.12, parkFactor: 0.88, color: '#0C2340' },
+  { team: 'CHC', teamId: 'chc', hr2026: 6,  hr2025Rate: 1.08, parkFactor: 1.04, color: '#0E3386' },
+];

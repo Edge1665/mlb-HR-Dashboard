@@ -1,0 +1,219 @@
+export type GameStatus = 'scheduled' | 'lineup_confirmed' | 'in_progress' | 'final' | 'delayed';
+
+export type ConfidenceTier = 'elite' | 'high' | 'medium' | 'low';
+
+export type PlatoonAdvantage = 'strong' | 'moderate' | 'neutral' | 'disadvantage';
+
+export type WindDirection = 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW';
+
+export interface Team {
+  id: string;
+  name: string;
+  abbreviation: string;
+  city: string;
+  league: 'AL' | 'NL';
+  division: 'East' | 'Central' | 'West';
+  record: { wins: number; losses: number };
+  logoColor: string;
+}
+
+export interface Ballpark {
+  id: string;
+  name: string;
+  city: string;
+  teamId: string;
+  hrFactor: number;
+  hrFactorTier: 'hitter' | 'neutral' | 'pitcher';
+  elevation: number;
+  dimensions: { leftField: number; centerField: number; rightField: number };
+}
+
+export interface Pitcher {
+  id: string;
+  name: string;
+  teamId: string;
+  throws: 'L' | 'R';
+  era: number;
+  whip: number;
+  hr9: number;
+  hrFbRate: number;
+  kPer9: number;
+  bbPer9: number;
+  fbPct: number;
+  avgFastballVelo: number;
+  season: {
+    gamesStarted: number;
+    innings: number;
+    era: number;
+    hr9: number;
+  };
+  last7: {
+    era: number;
+    hr9: number;
+  };
+}
+
+export interface BatterStatcast {
+  barrelRate: number;
+  exitVelocityAvg: number;
+  launchAngleAvg: number;
+  hardHitRate: number;
+  xSlugging: number;
+  xwOBA: number;
+  sweetSpotPct: number;
+  pullRate: number;
+  flyBallRate: number;
+  hrFbRate: number;
+}
+
+export interface BatterSplits {
+  vsLeft: { avg: number; obp: number; slg: number; hr: number; pa: number };
+  vsRight: { avg: number; obp: number; slg: number; hr: number; pa: number };
+}
+
+export interface Batter {
+  id: string;
+  name: string;
+  teamId: string;
+  position: string;
+  bats: 'L' | 'R' | 'S';
+  lineupSpot: number | null;
+  jerseyNumber: number;
+  age: number;
+  /** Whether this player is in a confirmed lineup (true) or pulled from roster as early prediction (false) */
+  lineupConfirmed?: boolean;
+  season: {
+    avg: number;
+    obp: number;
+    slg: number;
+    ops: number;
+    hr: number;
+    rbi: number;
+    games: number;
+    iso: number;
+  };
+  statcast: BatterStatcast;
+  splits: BatterSplits;
+  last7: { avg: number; hr: number; ops: number };
+  last14: { avg: number; hr: number; ops: number };
+  last30: { avg: number; hr: number; ops: number };
+  recentGameLog: GameLogEntry[];
+}
+
+export interface GameLogEntry {
+  date: string;
+  opponent: string;
+  ab: number;
+  h: number;
+  hr: number;
+  rbi: number;
+  bb: number;
+  k: number;
+  ops: number;
+}
+
+export interface Weather {
+  temp: number;
+  feelsLike: number;
+  condition: string;
+  windSpeed: number;
+  windDirection: WindDirection;
+  windToward: 'in' | 'out' | 'crosswind' | 'neutral';
+  precipitation: number;
+  humidity: number;
+  visibility: number;
+  hrImpact: 'positive' | 'neutral' | 'negative';
+  hrImpactScore: number;
+}
+
+export interface Game {
+  id: string;
+  date: string;
+  time: string;
+  timeET: string;
+  status: GameStatus;
+  awayTeamId: string;
+  homeTeamId: string;
+  ballparkId: string;
+  awayPitcherId: string;
+  homePitcherId: string;
+  tvNetwork: string;
+  weather: Weather;
+  lineupStatus: {
+    away: 'confirmed' | 'projected' | 'unknown';
+    home: 'confirmed' | 'projected' | 'unknown';
+  };
+  awayScore?: number;
+  homeScore?: number;
+  inning?: number;
+
+  /**
+   * Optional real team offense context for the prediction model.
+   * Only populate this if you have actual team-level data.
+   */
+  teamOffense?: {
+    away?: {
+      teamSeasonHR?: number;
+      teamGames?: number;
+      teamOPS?: number;
+    };
+    home?: {
+      teamSeasonHR?: number;
+      teamGames?: number;
+      teamOPS?: number;
+    };
+  };
+}
+
+export interface HRProjection {
+  id: string;
+  batterId: string;
+  gameId: string;
+  opposingPitcherId: string;
+  ballparkId: string;
+  hrProbability: number;
+  confidenceTier: ConfidenceTier;
+  platoonAdvantage: PlatoonAdvantage;
+  parkFactorBoost: number;
+  weatherImpact: number;
+  formMultiplier: number;
+  matchupScore: number;
+  projectedAtBats: number;
+  keyFactors: string[];
+  rank: number;
+
+  /** Whether the lineup is confirmed for this player */
+  lineupConfirmed?: boolean;
+
+  /** Plain-English explanation of the projection based on model inputs */
+  explanation?: string;
+
+  /** Gemini reference probability */
+  geminiProbability?: number;
+
+  /** Final probability after bounded Gemini adjustment */
+  adjustedProbability?: number;
+
+  /** The actual adjustment Gemini contributed, e.g. +0.8 or -0.5 */
+  geminiAdjustmentApplied?: number;
+
+  /** Gemini's analytical reasoning */
+  geminiReasoning?: string;
+
+  /** Gemini's single key insight */
+  geminiKeyInsight?: string;
+
+  /** Gemini confidence level */
+  geminiConfidence?: 'high' | 'medium' | 'low';
+
+  /** Optional UI helper: whether base model and Gemini broadly agreed */
+  geminiDisagreementTier?: 'aligned' | 'mixed' | 'high';
+}
+
+export interface PitchTypeVulnerability {
+  pitchType: string;
+  avgExitVelo: number;
+  hrRate: number;
+  whiffRate: number;
+  baValue: number;
+}
