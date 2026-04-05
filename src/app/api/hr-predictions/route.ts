@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
-import { buildPredictionInput, computeHRProbability, generateExplanation } from '@/services/hrPredictionService';
+import {
+  buildPredictionInput,
+  computeHRProbability,
+  generateExplanation,
+} from '@/services/hrPredictionService';
 import { fetchLiveMLBData } from '@/services/liveMLBDataService';
 import { enhanceWithGemini } from '@/services/geminiHREnhancement';
 import type { HRProjection } from '@/types';
@@ -8,26 +12,44 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
+function getGeminiDisagreementTier(
+  baseProbability: number,
+  adjustedProbability?: number
+): 'aligned' | 'mixed' | 'high' | undefined {
+  if (adjustedProbability == null) return undefined;
+
+  const diff = Math.abs(baseProbability - adjustedProbability);
+  if (diff < 1.0) return 'aligned';
+  if (diff < 2.5) return 'mixed';
+  return 'high';
+}
+
 export async function GET() {
   try {
-    // Fetch all live MLB data for today
     const { batters, pitchers, games, ballparks, teams } = await fetchLiveMLBData();
 
     const projections: HRProjection[] = [];
     const batterList = Object.values(batters);
 
     if (batterList.length === 0) {
-      return NextResponse.json({ projections: [], generatedAt: new Date().toISOString(), note: 'No lineups available yet for today.' });
+      return NextResponse.json({
+        projections: [],
+        generatedAt: new Date().toISOString(),
+        note: 'No lineups available yet for today.',
+      });
     }
 
-    // Build base projections first, then enhance top candidates with Gemini
-    const baseProjections: Array<{ projection: HRProjection; input: ReturnType<typeof buildPredictionInput>; result: ReturnType<typeof computeHRProbability> }> = [];
+    const baseProjections: Array<{
+      projection: HRProjection;
+      input: ReturnType<typeof buildPredictionInput>;
+      result: ReturnType<typeof computeHRProbability>;
+    }> = [];
 
     for (const batter of batterList) {
       if (!batter?.id || !batter?.teamId) continue;
 
       const game = games.find(
-        g => g.awayTeamId === batter.teamId || g.homeTeamId === batter.teamId
+        (g) => g.awayTeamId === batter.teamId || g.homeTeamId === batter.teamId
       );
       if (!game) continue;
 
@@ -64,20 +86,16 @@ export async function GET() {
       });
     }
 
-    // Sort by base probability to identify top candidates
     baseProjections.sort((a, b) => b.result.hrProbability - a.result.hrProbability);
 
-    // Enhance only top 30 players with Gemini to avoid serverless timeout (502)
     const GEMINI_LIMIT = 30;
     const topCandidates = baseProjections.slice(0, GEMINI_LIMIT);
     const restCandidates = baseProjections.slice(GEMINI_LIMIT);
 
-    // Enhance top candidates with Gemini (parallel calls)
     const geminiResults = await Promise.allSettled(
       topCandidates.map(({ input, result }) => enhanceWithGemini(input, result))
     );
 
-    // Merge Gemini enhancements into top projections
     for (let i = 0; i < topCandidates.length; i++) {
       const { projection } = topCandidates[i];
       const geminiResult = geminiResults[i];
@@ -85,38 +103,45 @@ export async function GET() {
       if (geminiResult.status === 'fulfilled' && geminiResult.value) {
         const enhancement = geminiResult.value;
         projection.geminiProbability = enhancement.geminiProbability;
-        projection.blendedProbability = enhancement.blendedProbability;
+        projection.adjustedProbability = enhancement.adjustedProbability;
+        projection.blendedProbability = enhancement.adjustedProbability;
+        projection.geminiAdjustmentApplied = enhancement.adjustmentApplied;
         projection.geminiReasoning = enhancement.reasoning;
         projection.geminiKeyInsight = enhancement.keyInsight;
         projection.geminiConfidence = enhancement.geminiConfidence;
-        // Use blended probability (50% base + 50% Gemini) as the displayed HR probability
-        projection.hrProbability = enhancement.blendedProbability;
-      } else if (geminiResult.status === 'rejected' || (geminiResult.status === 'fulfilled' && !geminiResult.value)) {
-        // Gemini failed — log and fall back to base model
-        console.warn(`[hr-predictions] Gemini enhancement failed for ${projection.batterId}, using base model only`);
+        projection.geminiDisagreementTier = getGeminiDisagreementTier(
+          projection.hrProbability,
+          enhancement.adjustedProbability
+        );
+      } else if (
+        geminiResult.status === 'rejected' ||
+        (geminiResult.status === 'fulfilled' && !geminiResult.value)
+      ) {
+        console.warn(
+          `[hr-predictions] Gemini enhancement failed for ${projection.batterId}, using base model only`
+        );
       }
 
-      // Carry lineupConfirmed from batter data
       const batter = batters[projection.batterId];
       projection.lineupConfirmed = batter?.lineupConfirmed ?? true;
-
       projections.push(projection);
     }
 
-    // Add remaining players (no Gemini enhancement) using base model only
     for (const { projection } of restCandidates) {
       const batter = batters[projection.batterId];
       projection.lineupConfirmed = batter?.lineupConfirmed ?? true;
       projections.push(projection);
     }
 
-    // Re-sort by final HR probability and assign ranks
     projections.sort((a, b) => b.hrProbability - a.hrProbability);
-    projections.forEach((p, i) => { p.rank = i + 1; });
+    projections.forEach((p, i) => {
+      p.rank = i + 1;
+    });
 
-    // Build lookup maps for client-side rendering
     const gamesMap: Record<string, (typeof games)[number]> = {};
-    games.forEach((g: (typeof games)[number]) => { gamesMap[g.id] = g; });
+    games.forEach((g: (typeof games)[number]) => {
+      gamesMap[g.id] = g;
+    });
 
     return NextResponse.json({
       projections,
@@ -126,6 +151,8 @@ export async function GET() {
       ballparks,
       teams,
       generatedAt: new Date().toISOString(),
+      modelVersion: 'base-statistical-v1',
+      advisoryLayer: 'gemini-advisory-only',
     });
   } catch (err) {
     console.error('[hr-predictions] Error computing predictions:', err);
