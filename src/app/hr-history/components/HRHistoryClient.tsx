@@ -1,444 +1,453 @@
 'use client';
-import React, { useState, useEffect, useCallback } from 'react';
-import { Calendar, CheckCircle2, XCircle, Clock, ChevronLeft, ChevronRight, Save, Trophy, Target, TrendingUp, Loader2 } from 'lucide-react';
-import type { DailyHistoryEntry, DailyPick, HROutcome } from '@/services/hrHistoryService';
+
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Calendar,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Clock3,
+  Loader2,
+  Target,
+  Trophy,
+} from 'lucide-react';
+
+type BoardType = 'model' | 'best' | 'edge';
+type LineupMode = 'confirmed' | 'all';
+
+type SnapshotSummary = {
+  id: string;
+  snapshotDate: string;
+  boardType: BoardType;
+  lineupMode: LineupMode;
+  snapshotKind: string;
+  capturedAt: string;
+  generatedAt: string | null;
+  trainingStartDate: string | null;
+  trainingExampleCount: number | null;
+  modelTrainedAt: string | null;
+  rowLimit: number;
+  top5Hits: number | null;
+  top10Hits: number | null;
+  scoredAt: string | null;
+};
+
+type SnapshotRow = {
+  rank: number;
+  batterId: string;
+  batterName: string;
+  teamId: string;
+  opponentTeamId: string;
+  gameId: string;
+  predictedProbability: number;
+  tier: string;
+  sportsbookOddsAmerican: number | null;
+  impliedProbability: number | null;
+  edge: number | null;
+  combinedScore: number | null;
+  sportsbook: string | null;
+  lineupConfirmed: boolean;
+  actualHitHr: boolean | null;
+  actualHrCount: number;
+};
+
+type SnapshotDetailResponse = {
+  ok: true;
+  snapshot: SnapshotSummary;
+  rows: SnapshotRow[];
+};
 
 function formatDate(dateStr: string): string {
-  const d = new Date(dateStr + 'T12:00:00');
-  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+  const date = new Date(`${dateStr}T12:00:00`);
+  return date.toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  });
 }
 
-function getTierColor(tier: string): string {
-  switch (tier) {
-    case 'elite': return 'text-purple-400 bg-purple-400/10 border-purple-400/20';
-    case 'high': return 'text-brand-400 bg-brand-400/10 border-brand-400/20';
-    case 'medium': return 'text-amber-400 bg-amber-400/10 border-amber-400/20';
-    default: return 'text-slate-400 bg-slate-400/10 border-slate-400/20';
-  }
+function formatCapturedAt(value: string): string {
+  return new Date(value).toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
 
-function getProbColor(prob: number): string {
-  if (prob >= 15) return 'text-purple-400';
-  if (prob >= 10) return 'text-brand-400';
-  if (prob >= 7) return 'text-amber-400';
+function formatPercent(value: number | null): string {
+  if (value == null) return '—';
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatBoardLabel(boardType: BoardType): string {
+  if (boardType === 'best') return 'Best';
+  if (boardType === 'edge') return 'Edge';
+  return 'Model';
+}
+
+function formatLineupLabel(lineupMode: LineupMode): string {
+  return lineupMode === 'confirmed' ? 'Confirmed' : 'All';
+}
+
+function getTierClass(tier: string): string {
+  if (tier === 'elite') return 'bg-purple-500/15 text-purple-300 border-purple-500/30';
+  if (tier === 'high') return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
+  if (tier === 'medium') return 'bg-amber-500/15 text-amber-300 border-amber-500/30';
+  return 'bg-slate-500/15 text-slate-300 border-slate-500/30';
+}
+
+function getOutcomeClass(hitHr: boolean | null): string {
+  if (hitHr === true) return 'text-emerald-300';
+  if (hitHr === false) return 'text-rose-300';
   return 'text-slate-400';
 }
 
-interface OutcomeButtonProps {
-  pick: DailyPick;
-  outcome: HROutcome | undefined;
-  onUpdate: (pickId: string, hitHr: boolean, hrCount: number) => void;
-  updating: boolean;
-}
-
-function OutcomeButton({ pick, outcome, onUpdate, updating }: OutcomeButtonProps) {
-  const hitHr = outcome?.hitHr;
-  const hrCount = outcome?.hrCount ?? 0;
-
-  if (hitHr === true) {
-    return (
-      <div className="flex items-center gap-2">
-        <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30">
-          <CheckCircle2 size={14} className="text-emerald-400" />
-          <span className="text-xs font-semibold text-emerald-400">
-            {hrCount > 1 ? `${hrCount} HR` : 'Hit HR'}
-          </span>
-        </div>
-        <button
-          onClick={() => onUpdate(pick.id, false, 0)}
-          disabled={updating}
-          className="text-xs text-slate-600 hover:text-slate-400 transition-colors"
-          title="Mark as no HR"
-        >
-          undo
-        </button>
-      </div>
-    );
-  }
-
-  if (hitHr === false) {
-    return (
-      <div className="flex items-center gap-2">
-        <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20">
-          <XCircle size={14} className="text-red-400" />
-          <span className="text-xs font-semibold text-red-400">No HR</span>
-        </div>
-        <button
-          onClick={() => onUpdate(pick.id, true, 1)}
-          disabled={updating}
-          className="text-xs text-slate-600 hover:text-slate-400 transition-colors"
-          title="Mark as HR"
-        >
-          undo
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex items-center gap-1.5">
-      <button
-        onClick={() => onUpdate(pick.id, true, 1)}
-        disabled={updating}
-        className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all disabled:opacity-50"
-      >
-        <CheckCircle2 size={11} />
-        HR
-      </button>
-      <button
-        onClick={() => onUpdate(pick.id, false, 0)}
-        disabled={updating}
-        className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-all disabled:opacity-50"
-      >
-        <XCircle size={11} />
-        No
-      </button>
-    </div>
-  );
+function getBoardSortWeight(boardType: BoardType): number {
+  if (boardType === 'model') return 0;
+  if (boardType === 'best') return 1;
+  return 2;
 }
 
 export default function HRHistoryClient() {
-  const [dates, setDates] = useState<string[]>([]);
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  const [entry, setEntry] = useState<DailyHistoryEntry | null>(null);
-  const [loadingDates, setLoadingDates] = useState(true);
-  const [loadingEntry, setLoadingEntry] = useState(false);
-  const [updatingPickId, setUpdatingPickId] = useState<string | null>(null);
-  const [savingToday, setSavingToday] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
-  const [todaySaved, setTodaySaved] = useState(false);
-  const [dateIdx, setDateIdx] = useState(0);
+  const [snapshots, setSnapshots] = useState<SnapshotSummary[]>([]);
+  const [loadingSnapshots, setLoadingSnapshots] = useState(true);
+  const [selectedDateIndex, setSelectedDateIndex] = useState(0);
+  const [selectedSnapshotId, setSelectedSnapshotId] = useState<string | null>(null);
+  const [snapshotDetail, setSnapshotDetail] = useState<SnapshotDetailResponse | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
 
-  const fetchDates = useCallback(async () => {
-    setLoadingDates(true);
-    try {
-      const res = await fetch('/api/hr-history');
-      const json = await res.json();
-      const d: string[] = json.dates ?? [];
-      setDates(d);
-      if (d.length > 0 && !selectedDate) {
-        setSelectedDate(d[0]);
-        setDateIdx(0);
+  useEffect(() => {
+    async function loadSnapshots() {
+      setLoadingSnapshots(true);
+      try {
+        const response = await fetch('/api/hr-board-snapshots', { cache: 'no-store' });
+        const json = await response.json();
+        setSnapshots((json.snapshots ?? []) as SnapshotSummary[]);
+      } catch {
+        setSnapshots([]);
+      } finally {
+        setLoadingSnapshots(false);
       }
-    } catch {
-      setDates([]);
-    } finally {
-      setLoadingDates(false);
     }
-  }, [selectedDate]);
 
-  const checkTodaySaved = useCallback(async () => {
-    try {
-      const res = await fetch('/api/hr-history/save-today');
-      const json = await res.json();
-      setTodaySaved(json.saved ?? false);
-    } catch {}
+    loadSnapshots();
   }, []);
 
-  useEffect(() => {
-    fetchDates();
-    checkTodaySaved();
-  }, [fetchDates, checkTodaySaved]);
+  const snapshotDates = useMemo(
+    () => [...new Set(snapshots.map((snapshot) => snapshot.snapshotDate))].slice(0, 7),
+    [snapshots]
+  );
 
-  useEffect(() => {
-    if (!selectedDate) return;
-    setLoadingEntry(true);
-    fetch(`/api/hr-history?date=${selectedDate}`)
-      .then(r => r.json())
-      .then(json => setEntry(json.date ? json : null))
-      .catch(() => setEntry(null))
-      .finally(() => setLoadingEntry(false));
-  }, [selectedDate]);
+  const selectedDate = snapshotDates[selectedDateIndex] ?? null;
 
-  const handleSaveToday = async () => {
-    setSavingToday(true);
-    setSaveStatus('idle');
-    try {
-      // Fetch today's predictions first
-      const predRes = await fetch('/api/hr-predictions', { cache: 'no-store' });
-      if (!predRes.ok) throw new Error('Failed to fetch predictions');
-      const predData = await predRes.json();
+  const snapshotsForSelectedDate = useMemo(() => {
+    if (!selectedDate) return [];
+    return snapshots
+      .filter((snapshot) => snapshot.snapshotDate === selectedDate)
+      .sort((a, b) => {
+        const boardWeightDiff =
+          getBoardSortWeight(a.boardType) - getBoardSortWeight(b.boardType);
+        if (boardWeightDiff !== 0) return boardWeightDiff;
 
-      const saveRes = await fetch('/api/hr-history/save-today', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          projections: predData.projections ?? [],
-          batters: predData.batters ?? {},
-          pitchers: predData.pitchers ?? {},
-        }),
+        return new Date(b.capturedAt).getTime() - new Date(a.capturedAt).getTime();
       });
+  }, [selectedDate, snapshots]);
 
-      if (!saveRes.ok) throw new Error('Save failed');
-      setSaveStatus('saved');
-      setTodaySaved(true);
-      await fetchDates();
-    } catch {
-      setSaveStatus('error');
-    } finally {
-      setSavingToday(false);
+  useEffect(() => {
+    if (!selectedDate) {
+      setSelectedSnapshotId(null);
+      return;
     }
-  };
 
-  const handleOutcomeUpdate = async (pickId: string, hitHr: boolean, hrCount: number) => {
-    setUpdatingPickId(pickId);
-    try {
-      await fetch('/api/hr-history/outcomes', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pickId, hitHr, hrCount }),
-      });
-      // Refresh entry
-      if (selectedDate) {
-        const res = await fetch(`/api/hr-history?date=${selectedDate}`);
-        const json = await res.json();
-        setEntry(json.date ? json : null);
+    const preferred =
+      snapshotsForSelectedDate.find((snapshot) => snapshot.boardType === 'model') ??
+      snapshotsForSelectedDate[0] ??
+      null;
+
+    setSelectedSnapshotId(preferred?.id ?? null);
+  }, [selectedDate, snapshotsForSelectedDate]);
+
+  useEffect(() => {
+    if (!selectedSnapshotId) {
+      setSnapshotDetail(null);
+      return;
+    }
+
+    async function loadSnapshotDetail() {
+      setLoadingDetail(true);
+      try {
+        const response = await fetch(
+          `/api/hr-board-snapshots?snapshotId=${selectedSnapshotId}`,
+          { cache: 'no-store' }
+        );
+        const json = (await response.json()) as SnapshotDetailResponse;
+        setSnapshotDetail(json.ok ? json : null);
+      } catch {
+        setSnapshotDetail(null);
+      } finally {
+        setLoadingDetail(false);
       }
-    } finally {
-      setUpdatingPickId(null);
     }
-  };
 
-  const navigateDate = (dir: 'prev' | 'next') => {
-    const newIdx = dir === 'next' ? dateIdx + 1 : dateIdx - 1;
-    if (newIdx < 0 || newIdx >= dates.length) return;
-    setDateIdx(newIdx);
-    setSelectedDate(dates[newIdx]);
-  };
+    loadSnapshotDetail();
+  }, [selectedSnapshotId]);
 
-  // Stats for selected date
-  const outcomes = entry?.outcomes ?? [];
-  const picks = entry?.picks ?? [];
-  const resolved = outcomes.filter(o => o.hitHr !== null);
-  const hits = outcomes.filter(o => o.hitHr === true);
-  const accuracy = resolved.length > 0 ? Math.round((hits.length / resolved.length) * 100) : null;
+  const selectedDateStats = useMemo(() => {
+    const scored = snapshotsForSelectedDate.filter((snapshot) => snapshot.top10Hits != null);
+    return {
+      pendingCount: snapshotsForSelectedDate.length - scored.length,
+      totalTop10Hits: scored.reduce((sum, snapshot) => sum + (snapshot.top10Hits ?? 0), 0),
+      totalTop5Hits: scored.reduce((sum, snapshot) => sum + (snapshot.top5Hits ?? 0), 0),
+    };
+  }, [snapshotsForSelectedDate]);
 
   return (
     <div className="space-y-6">
-      {/* Header + Save Today */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-100">HR Pick History</h1>
-          <p className="text-sm text-slate-500 mt-1">Browse previous days' top 10 HR targets and track actual outcomes</p>
+          <h1 className="text-2xl font-bold text-slate-100">Official Board History</h1>
+          <p className="mt-1 text-sm text-slate-400">
+            Review the last 7 days of saved official boards and see which picks actually homered.
+          </p>
         </div>
-        <div className="flex items-center gap-3">
-          {saveStatus === 'saved' && (
-            <span className="text-xs text-emerald-400 flex items-center gap-1">
-              <CheckCircle2 size={12} /> Saved!
-            </span>
-          )}
-          {saveStatus === 'error' && (
-            <span className="text-xs text-red-400">Save failed</span>
-          )}
-          <button
-            onClick={handleSaveToday}
-            disabled={savingToday}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-              todaySaved
-                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20' :'bg-brand-500/10 text-brand-400 border border-brand-500/20 hover:bg-brand-500/20'
-            } disabled:opacity-50`}
-          >
-            {savingToday ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <Save size={14} />
-            )}
-            {savingToday ? 'Savingâ€¦' : todaySaved ? 'Re-save Today' : "Save Today's Top 10"}
-          </button>
-        </div>
+        <a
+          href="/hr-daily-board"
+          className="rounded-lg border border-surface-400 px-4 py-2 text-sm text-slate-200 hover:bg-surface-600"
+        >
+          Back To Board
+        </a>
       </div>
 
-      {/* Date Navigator */}
-      {loadingDates ? (
-        <div className="flex items-center gap-2 text-slate-500 text-sm">
-          <Loader2 size={16} className="animate-spin" />
-          Loading historyâ€¦
+      {loadingSnapshots ? (
+        <div className="flex items-center gap-3 rounded-xl border border-surface-400 bg-surface-800 p-6">
+          <Loader2 size={18} className="animate-spin text-brand-400" />
+          <span className="text-sm text-slate-400">Loading snapshot history...</span>
         </div>
-      ) : dates.length === 0 ? (
-        <div className="card-base rounded-xl p-8 text-center">
-          <Calendar size={40} className="mx-auto text-slate-600 mb-3" />
-          <p className="text-slate-300 font-medium">No history yet</p>
-          <p className="text-slate-500 text-sm mt-1">Click "Save Today's Top 10" to start tracking</p>
+      ) : snapshotDates.length === 0 ? (
+        <div className="rounded-xl border border-surface-400 bg-surface-800 p-8 text-center">
+          <Calendar size={36} className="mx-auto mb-3 text-slate-500" />
+          <p className="text-base font-semibold text-slate-200">No official boards saved yet</p>
+          <p className="mt-1 text-sm text-slate-400">
+            Save a board before first pitch with `npm run hr:save-official-board`.
+          </p>
         </div>
       ) : (
         <>
-          {/* Date selector */}
-          <div className="card-base rounded-xl p-4">
+          <div className="rounded-xl border border-surface-400 bg-surface-800 p-4">
             <div className="flex items-center justify-between gap-4">
               <button
-                onClick={() => navigateDate('next')}
-                disabled={dateIdx >= dates.length - 1}
-                className="p-2 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-surface-500 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                onClick={() => setSelectedDateIndex((index) => Math.max(0, index - 1))}
+                disabled={selectedDateIndex === 0}
+                className="rounded-lg p-2 text-slate-400 hover:bg-surface-600 hover:text-slate-100 disabled:opacity-30"
               >
                 <ChevronLeft size={18} />
               </button>
 
-              <div className="flex-1 flex items-center justify-center gap-3 flex-wrap">
-                {dates.slice(0, 7).map((d, i) => (
+              <div className="flex flex-1 flex-wrap justify-center gap-2">
+                {snapshotDates.map((date, index) => (
                   <button
-                    key={d}
-                    onClick={() => { setSelectedDate(d); setDateIdx(i); }}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                      selectedDate === d
-                        ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30' :'text-slate-500 hover:text-slate-200 hover:bg-surface-500'
+                    key={date}
+                    onClick={() => setSelectedDateIndex(index)}
+                    className={`rounded-lg px-3 py-2 text-xs font-medium transition-all ${
+                      index === selectedDateIndex
+                        ? 'border border-brand-500/30 bg-brand-500/15 text-brand-300'
+                        : 'text-slate-400 hover:bg-surface-600 hover:text-slate-100'
                     }`}
                   >
-                    {formatDate(d)}
+                    {formatDate(date)}
                   </button>
                 ))}
               </div>
 
               <button
-                onClick={() => navigateDate('prev')}
-                disabled={dateIdx <= 0}
-                className="p-2 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-surface-500 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                onClick={() =>
+                  setSelectedDateIndex((index) => Math.min(snapshotDates.length - 1, index + 1))
+                }
+                disabled={selectedDateIndex === snapshotDates.length - 1}
+                className="rounded-lg p-2 text-slate-400 hover:bg-surface-600 hover:text-slate-100 disabled:opacity-30"
               >
                 <ChevronRight size={18} />
               </button>
             </div>
           </div>
 
-          {/* Stats bar for selected date */}
-          {selectedDate && !loadingEntry && entry && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="card-base rounded-xl p-4 flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-brand-500/10 flex items-center justify-center flex-shrink-0">
-                  <Target size={18} className="text-brand-400" />
-                </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-xl border border-surface-400 bg-surface-800 p-4">
+              <div className="flex items-center gap-3">
+                <Target size={18} className="text-brand-300" />
                 <div>
-                  <p className="text-xs text-slate-500">Picks</p>
-                  <p className="text-xl font-bold text-slate-100">{picks.length}</p>
-                </div>
-              </div>
-              <div className="card-base rounded-xl p-4 flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
-                  <Trophy size={18} className="text-emerald-400" />
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500">Hit HR</p>
-                  <p className="text-xl font-bold text-emerald-400">{hits.length}</p>
-                </div>
-              </div>
-              <div className="card-base rounded-xl p-4 flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-amber-500/10 flex items-center justify-center flex-shrink-0">
-                  <Clock size={18} className="text-amber-400" />
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500">Pending</p>
-                  <p className="text-xl font-bold text-amber-400">{picks.length - resolved.length}</p>
-                </div>
-              </div>
-              <div className="card-base rounded-xl p-4 flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-purple-500/10 flex items-center justify-center flex-shrink-0">
-                  <TrendingUp size={18} className="text-purple-400" />
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500">Accuracy</p>
-                  <p className="text-xl font-bold text-purple-400">
-                    {accuracy !== null ? `${accuracy}%` : 'â€”'}
+                  <p className="text-xs text-slate-400">Saved Boards</p>
+                  <p className="text-xl font-bold text-slate-100">
+                    {snapshotsForSelectedDate.length}
                   </p>
                 </div>
               </div>
             </div>
-          )}
-
-          {/* Picks table */}
-          {loadingEntry ? (
-            <div className="flex items-center justify-center py-16 gap-3">
-              <Loader2 size={24} className="animate-spin text-brand-400" />
-              <span className="text-slate-400 text-sm">Loading picksâ€¦</span>
-            </div>
-          ) : !entry ? (
-            <div className="card-base rounded-xl p-8 text-center">
-              <p className="text-slate-500 text-sm">No data for this date</p>
-            </div>
-          ) : (
-            <div className="card-base rounded-xl overflow-hidden">
-              <div className="px-4 py-3 border-b border-surface-400 flex items-center justify-between">
+            <div className="rounded-xl border border-surface-400 bg-surface-800 p-4">
+              <div className="flex items-center gap-3">
+                <Trophy size={18} className="text-emerald-300" />
                 <div>
-                  <h2 className="text-sm font-semibold text-slate-100">
-                    Top 10 HR Targets â€” {formatDate(selectedDate!)}
-                  </h2>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Click HR / No to record actual outcomes
+                  <p className="text-xs text-slate-400">Total Top 10 Hits</p>
+                  <p className="text-xl font-bold text-emerald-300">
+                    {selectedDateStats.totalTop10Hits}
                   </p>
                 </div>
-                <span className="text-xs text-slate-500 font-mono-stat">{picks.length} picks</span>
               </div>
+            </div>
+            <div className="rounded-xl border border-surface-400 bg-surface-800 p-4">
+              <div className="flex items-center gap-3">
+                <CheckCircle2 size={18} className="text-purple-300" />
+                <div>
+                  <p className="text-xs text-slate-400">Total Top 5 Hits</p>
+                  <p className="text-xl font-bold text-purple-300">
+                    {selectedDateStats.totalTop5Hits}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="rounded-xl border border-surface-400 bg-surface-800 p-4">
+              <div className="flex items-center gap-3">
+                <Clock3 size={18} className="text-amber-300" />
+                <div>
+                  <p className="text-xs text-slate-400">Pending Boards</p>
+                  <p className="text-xl font-bold text-amber-300">
+                    {selectedDateStats.pendingCount}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-surface-400 bg-surface-600">
-                      <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider w-8">#</th>
-                      <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider min-w-40">Player</th>
-                      <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider min-w-32">Matchup</th>
-                      <th className="px-3 py-2.5 text-right text-xs font-semibold text-slate-400 uppercase tracking-wider w-24">HR Prob</th>
-                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider w-20">Tier</th>
-                      <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider min-w-36">Outcome</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {picks.map((pick, idx) => {
-                      const outcome = outcomes.find(o => o.pickId === pick.id);
-                      const isUpdating = updatingPickId === pick.id;
-                      return (
-                        <tr
-                          key={pick.id}
-                          className={`border-b border-surface-400 transition-colors duration-100 ${
-                            outcome?.hitHr === true
-                              ? 'bg-emerald-500/5'
-                              : outcome?.hitHr === false
-                              ? 'bg-red-500/5'
-                              : idx % 2 === 0 ? 'bg-surface-700' : 'bg-surface-800'
-                          }`}
-                        >
-                          <td className="px-4 py-3 text-xs font-mono-stat text-slate-500">{pick.rank}</td>
-                          <td className="px-4 py-3">
-                            <div>
-                              <p className="text-sm font-semibold text-slate-100">{pick.playerName}</p>
-                              <p className="text-xs text-slate-500">{pick.teamAbbreviation}</p>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            {pick.opposingPitcher ? (
-                              <p className="text-xs text-slate-400">vs {pick.opposingPitcher}</p>
-                            ) : (
-                              <p className="text-xs text-slate-600 italic">TBD</p>
-                            )}
-                          </td>
-                          <td className="px-3 py-3 text-right">
-                            <span className={`text-sm font-bold font-mono-stat ${getProbColor(pick.hrProbability)}`}>
-                              {pick.hrProbability.toFixed(1)}%
-                            </span>
-                          </td>
-                          <td className="px-3 py-3">
-                            <span className={`text-xs px-1.5 py-0.5 rounded-md border font-medium ${getTierColor(pick.confidenceTier)}`}>
-                              {pick.confidenceTier.charAt(0).toUpperCase() + pick.confidenceTier.slice(1)}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            {isUpdating ? (
-                              <Loader2 size={14} className="animate-spin text-slate-400" />
-                            ) : (
-                              <OutcomeButton
-                                pick={pick}
-                                outcome={outcome}
-                                onUpdate={handleOutcomeUpdate}
-                                updating={isUpdating}
-                              />
-                            )}
-                          </td>
+          <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+            <div className="space-y-3">
+              {snapshotsForSelectedDate.map((snapshot) => {
+                const isActive = snapshot.id === selectedSnapshotId;
+                return (
+                  <button
+                    key={snapshot.id}
+                    onClick={() => setSelectedSnapshotId(snapshot.id)}
+                    className={`w-full rounded-xl border p-4 text-left transition-all ${
+                      isActive
+                        ? 'border-brand-500/40 bg-brand-500/10'
+                        : 'border-surface-400 bg-surface-800 hover:bg-surface-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-100">
+                          {formatBoardLabel(snapshot.boardType)} Board
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          {formatLineupLabel(snapshot.lineupMode)} • {formatCapturedAt(snapshot.capturedAt)}
+                        </p>
+                      </div>
+                      <span className="rounded-md border border-surface-400 px-2 py-1 text-xs text-slate-300">
+                        Top {snapshot.rowLimit}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded-lg bg-surface-700 px-3 py-2">
+                        <p className="text-slate-400">Top 5 Hits</p>
+                        <p className="mt-1 font-semibold text-slate-100">
+                          {snapshot.top5Hits ?? 'Pending'}
+                        </p>
+                      </div>
+                      <div className="rounded-lg bg-surface-700 px-3 py-2">
+                        <p className="text-slate-400">Top 10 Hits</p>
+                        <p className="mt-1 font-semibold text-slate-100">
+                          {snapshot.top10Hits ?? 'Pending'}
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="rounded-xl border border-surface-400 bg-surface-800">
+              {loadingDetail ? (
+                <div className="flex items-center gap-3 p-6">
+                  <Loader2 size={18} className="animate-spin text-brand-400" />
+                  <span className="text-sm text-slate-400">Loading board details...</span>
+                </div>
+              ) : !snapshotDetail ? (
+                <div className="p-6 text-sm text-slate-400">Select a saved board to inspect it.</div>
+              ) : (
+                <>
+                  <div className="border-b border-surface-400 px-5 py-4">
+                    <h2 className="text-lg font-semibold text-slate-100">
+                      {formatBoardLabel(snapshotDetail.snapshot.boardType)} Board • {formatDate(snapshotDetail.snapshot.snapshotDate)}
+                    </h2>
+                    <p className="mt-1 text-sm text-slate-400">
+                      Captured {formatCapturedAt(snapshotDetail.snapshot.capturedAt)} • {formatLineupLabel(snapshotDetail.snapshot.lineupMode)} • Trained on {snapshotDetail.snapshot.trainingExampleCount ?? '—'} examples
+                    </p>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-surface-400 bg-surface-700 text-left text-xs uppercase tracking-wide text-slate-400">
+                          <th className="px-4 py-3">#</th>
+                          <th className="px-4 py-3">Player</th>
+                          <th className="px-4 py-3">Model</th>
+                          <th className="px-4 py-3">Edge</th>
+                          <th className="px-4 py-3">Tier</th>
+                          <th className="px-4 py-3">Lineup</th>
+                          <th className="px-4 py-3">Outcome</th>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                      </thead>
+                      <tbody>
+                        {snapshotDetail.rows.map((row) => (
+                          <tr
+                            key={`${snapshotDetail.snapshot.id}-${row.rank}-${row.batterId}`}
+                            className="border-b border-surface-400/70"
+                          >
+                            <td className="px-4 py-3 font-mono text-slate-400">{row.rank}</td>
+                            <td className="px-4 py-3">
+                              <p className="font-medium text-slate-100">{row.batterName}</p>
+                              <p className="text-xs text-slate-500">
+                                {row.teamId} vs {row.opponentTeamId}
+                              </p>
+                            </td>
+                            <td className="px-4 py-3 font-semibold text-slate-100">
+                              {formatPercent(row.predictedProbability)}
+                            </td>
+                            <td className="px-4 py-3 text-slate-300">
+                              {row.edge == null ? '—' : formatPercent(row.edge)}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`rounded-md border px-2 py-1 text-xs font-medium ${getTierClass(row.tier)}`}>
+                                {row.tier}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-slate-300">
+                              {row.lineupConfirmed ? 'Confirmed' : 'Projected'}
+                            </td>
+                            <td className={`px-4 py-3 font-medium ${getOutcomeClass(row.actualHitHr)}`}>
+                              {row.actualHitHr === true
+                                ? row.actualHrCount > 1
+                                  ? `${row.actualHrCount} HR`
+                                  : 'HR'
+                                : row.actualHitHr === false
+                                  ? 'No HR'
+                                  : 'Pending'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
             </div>
-          )}
+          </div>
         </>
       )}
     </div>
   );
 }
+
+
+

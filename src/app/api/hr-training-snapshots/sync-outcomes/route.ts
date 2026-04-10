@@ -19,11 +19,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: result.error }, { status: 500 });
     }
 
-    return NextResponse.json({
-      success: true,
-      updatedCount: result.updatedCount,
-      missingCount: result.missingCount,
-    });
+    return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed syncing outcomes';
     return NextResponse.json({ error: message }, { status: 500 });

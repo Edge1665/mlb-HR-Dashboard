@@ -17,6 +17,11 @@ function getTodayDateString(): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function normalizeScheduleDate(date?: string): string {
+  if (!date) return getTodayDateString();
+  return date.slice(0, 10);
+}
+
 function formatGameTime(dateTimeUTC: string | undefined | null): string {
   if (!dateTimeUTC) return 'TBD';
   try {
@@ -82,9 +87,9 @@ export interface RealMLBGame {
   inningState?: string;
 }
 
-export async function fetchTodaysMLBSchedule(): Promise<RealMLBGame[]> {
-  const date = getTodayDateString();
-  const url = `${MLB_API_BASE}/schedule?sportId=1&date=${date}&hydrate=probablePitcher,linescore,broadcasts(all),team,venue&gameType=R,S`;
+export async function fetchTodaysMLBSchedule(date?: string): Promise<RealMLBGame[]> {
+  const normalizedDate = normalizeScheduleDate(date);
+  const url = `${MLB_API_BASE}/schedule?sportId=1&date=${normalizedDate}&hydrate=probablePitcher,linescore,broadcasts(all),team,venue&gameType=R`;
 
   let res: Response;
   try {

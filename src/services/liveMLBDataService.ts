@@ -4,11 +4,91 @@
  * internal Batter / Pitcher / Game / Ballpark types for the HR prediction model.
  */
 
-import type { Batter, Pitcher, Game, Ballpark, Team } from '@/types';
+import type { Batter, Pitcher, Game, Ballpark, Team, Weather } from '@/types';
 import { fetchTodaysMLBSchedule, type RealMLBGame } from './mlbApi';
 import { fetchGameLineup } from './lineupService';
+import { fetchWeatherForTeamHomePark, getNeutralWeather } from '@/services/weatherService';
 
 const MLB_API_BASE = 'https://statsapi.mlb.com/api/v1';
+
+function normalizeTargetDate(value?: string): string {
+  if (value) return value.slice(0, 10);
+
+  const now = new Date();
+  const etDate = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const yyyy = etDate.getFullYear();
+  const mm = String(etDate.getMonth() + 1).padStart(2, '0');
+  const dd = String(etDate.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function getSeasonFromDate(value?: string): number {
+  const normalized = normalizeTargetDate(value);
+  const [year] = normalized.split('-').map(Number);
+  return Number.isFinite(year) ? year : new Date().getFullYear();
+}
+
+function isTodayETDate(date: string): boolean {
+  return normalizeTargetDate(date) === normalizeTargetDate();
+}
+
+function toGameWeather(
+  weather: Awaited<ReturnType<typeof fetchWeatherForTeamHomePark>> | null
+): Weather {
+  if (!weather) {
+    return {
+      temp: 70,
+      feelsLike: 70,
+      condition: 'Unknown',
+      windSpeed: 0,
+      windDirection: 'N',
+      windToward: 'neutral',
+      precipitation: 0,
+      humidity: 50,
+      visibility: 10,
+      hrImpact: 'neutral',
+      hrImpactScore: 0,
+    };
+  }
+
+  const mappedImpact: Weather['hrImpact'] =
+    weather.hrImpact === 'poor'
+      ? 'negative'
+      : weather.hrImpact === 'good' || weather.hrImpact === 'great'
+        ? 'positive'
+        : 'neutral';
+
+  const mappedToward: Weather['windToward'] =
+    weather.windToward === 'out' || weather.windToward === 'in'
+      ? weather.windToward
+      : 'neutral';
+
+  const mappedDirection: Weather['windDirection'] =
+    weather.windDirection === 'N' ||
+    weather.windDirection === 'NE' ||
+    weather.windDirection === 'E' ||
+    weather.windDirection === 'SE' ||
+    weather.windDirection === 'S' ||
+    weather.windDirection === 'SW' ||
+    weather.windDirection === 'W' ||
+    weather.windDirection === 'NW'
+      ? weather.windDirection
+      : 'N';
+
+  return {
+    temp: weather.temp,
+    feelsLike: weather.feelsLike,
+    condition: weather.condition,
+    windSpeed: weather.windSpeed,
+    windDirection: mappedDirection,
+    windToward: mappedToward,
+    precipitation: weather.precipitation,
+    humidity: weather.humidity,
+    visibility: weather.visibility,
+    hrImpact: mappedImpact,
+    hrImpactScore: weather.hrImpactScore,
+  };
+}
 
 // ─── Fetch helper with AbortController timeout ────────────────────────────────
 // Prevents the Node.js TransformStream race condition (controller[kState].transformAlgorithm)
@@ -183,11 +263,11 @@ interface MLBPitcherStats {
   innings: number;
 }
 
-async function fetchPitcherStats(pitcherId: number): Promise<MLBPitcherStats | null> {
+async function fetchPitcherStats(pitcherId: number, season: number): Promise<MLBPitcherStats | null> {
   if (!pitcherId || pitcherId <= 0) return null;
   try {
     const res = await fetchWithTimeout(
-      `${MLB_API_BASE}/people/${pitcherId}?hydrate=stats(group=[pitching],type=[season,statSplits],season=${new Date().getFullYear()})`,
+      `${MLB_API_BASE}/people/${pitcherId}?hydrate=stats(group=[pitching],type=[season,statSplits],season=${season})`,
       { cache: 'no-store', timeoutMs: 8000 }
     );
     if (!res.ok) return null;
@@ -249,12 +329,11 @@ interface MLBBatterStats {
   slgVsRight: number;
 }
 
-async function fetchBatterStats(batterId: number): Promise<MLBBatterStats | null> {
+async function fetchBatterStats(batterId: number, season: number): Promise<MLBBatterStats | null> {
   if (!batterId || batterId <= 0) return null;
   try {
-    const year = new Date().getFullYear();
     const res = await fetchWithTimeout(
-      `${MLB_API_BASE}/people/${batterId}?hydrate=stats(group=[hitting],type=[season,statSplits],season=${year},sitCodes=[vl,vr])`,
+      `${MLB_API_BASE}/people/${batterId}?hydrate=stats(group=[hitting],type=[season,statSplits],season=${season},sitCodes=[vl,vr])`,
       { cache: 'no-store', timeoutMs: 8000 }
     );
     if (!res.ok) return null;
@@ -320,13 +399,16 @@ interface BatterRecentForm {
   last30OPS: number;
 }
 
-async function fetchBatterRecentForm(batterId: number): Promise<BatterRecentForm> {
+async function fetchBatterRecentForm(
+  batterId: number,
+  targetDate: string,
+  season: number
+): Promise<BatterRecentForm> {
   const defaultForm: BatterRecentForm = { last7HR: 0, last7OPS: 0, last14HR: 0, last14OPS: 0, last30HR: 0, last30OPS: 0 };
   if (!batterId || batterId <= 0) return defaultForm;
   try {
-    const year = new Date().getFullYear();
     const res = await fetchWithTimeout(
-      `${MLB_API_BASE}/people/${batterId}/stats?stats=gameLog&group=hitting&season=${year}`,
+      `${MLB_API_BASE}/people/${batterId}/stats?stats=gameLog&group=hitting&season=${season}`,
       { cache: 'no-store', timeoutMs: 8000 }
     );
     if (!res.ok) return defaultForm;
@@ -337,9 +419,8 @@ async function fetchBatterRecentForm(batterId: number): Promise<BatterRecentForm
 
     if (splits.length === 0) return defaultForm;
 
-    const now = new Date();
-    // Use today's date at midnight UTC for consistent comparison
-    const todayMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const [targetYear, targetMonth, targetDay] = normalizeTargetDate(targetDate).split('-').map(Number);
+    const todayMs = Date.UTC(targetYear, targetMonth - 1, targetDay);
 
     let hr7 = 0, ab7 = 0, h7 = 0, bb7 = 0, hbp7 = 0, sf7 = 0, tb7 = 0;
     let hr14 = 0, ab14 = 0, h14 = 0, bb14 = 0, hbp14 = 0, sf14 = 0, tb14 = 0;
@@ -421,11 +502,10 @@ interface StatcastRow {
  * Uses min=1 BBE so early-season players with few batted balls are included.
  * Falls back to an empty map on any error so the rest of the pipeline still works.
  */
-async function fetchStatcastLeaderboard(): Promise<Record<string, StatcastRow>> {
-  const year = new Date().getFullYear();
+async function fetchStatcastLeaderboard(season: number): Promise<Record<string, StatcastRow>> {
   const url =
     `https://baseballsavant.mlb.com/leaderboard/custom` +
-    `?year=${year}&type=batter&filter=&sort=4&sortDir=desc&min=1` +
+    `?year=${season}&type=batter&filter=&sort=4&sortDir=desc&min=1` +
     `&selections=exit_velocity_avg,launch_angle_avg,sweet_spot_percent,barrel_batted_rate,hard_hit_percent,xslg,xwoba` +
     `&chart=false&csv=true`;
 
@@ -532,21 +612,25 @@ export interface LiveMLBData {
   teams: Record<string, Team>;
 }
 
-export async function fetchLiveMLBData(): Promise<LiveMLBData> {
+export async function fetchLiveMLBData(targetDate?: string): Promise<LiveMLBData> {
   const batters: Record<string, Batter> = {};
   const pitchers: Record<string, Pitcher> = {};
   const games: Game[] = [];
   const ballparks: Record<string, Ballpark> = {};
   const teams: Record<string, Team> = {};
+  const normalizedTargetDate = normalizeTargetDate(targetDate);
+  const season = getSeasonFromDate(normalizedTargetDate);
+  const allowRosterFallback = isTodayETDate(normalizedTargetDate);
+  const allowLiveWeather = isTodayETDate(normalizedTargetDate);
 
-  // 1. Fetch today's schedule AND Statcast leaderboard in parallel
+  // 1. Fetch the target-date schedule AND season-aligned Statcast leaderboard in parallel
   let schedule: RealMLBGame[] = [];
   let statcastMap: Record<string, StatcastRow> = {};
 
   try {
     [schedule, statcastMap] = await Promise.all([
-      fetchTodaysMLBSchedule(),
-      fetchStatcastLeaderboard(),
+      fetchTodaysMLBSchedule(normalizedTargetDate),
+      fetchStatcastLeaderboard(season),
     ]);
   } catch (err) {
     console.error('[liveMLBData] Schedule fetch failed:', err);
@@ -619,7 +703,7 @@ export async function fetchLiveMLBData(): Promise<LiveMLBData> {
   for (const pid of pitcherIdSet) {
     pitcherFetchPromises.push(
       (async () => {
-        const stats = await fetchPitcherStats(pid);
+        const stats = await fetchPitcherStats(pid, season);
         // Find which game/team this pitcher belongs to
         const game = schedule.find(
           g => g.awayProbablePitcher?.id === pid || g.homeProbablePitcher?.id === pid
@@ -701,8 +785,11 @@ export async function fetchLiveMLBData(): Promise<LiveMLBData> {
     const homePitcherId = g.homeProbablePitcher?.id ? String(g.homeProbablePitcher.id) : '';
     const parkId = String(g.venueId);
 
-    const awayLineupConfirmed = lineup?.away?.status === 'confirmed';
+        const awayLineupConfirmed = lineup?.away?.status === 'confirmed';
     const homeLineupConfirmed = lineup?.home?.status === 'confirmed';
+    const liveWeather = allowLiveWeather
+      ? await fetchWeatherForTeamHomePark(String(g.homeTeamId))
+      : null;
 
     const game: Game = {
       id: String(g.gamePk),
@@ -716,22 +803,18 @@ export async function fetchLiveMLBData(): Promise<LiveMLBData> {
       awayPitcherId,
       homePitcherId,
       tvNetwork: g.broadcasts.join(' / ') || 'TBD',
-      weather: {
-        temp: 72,
-        feelsLike: 70,
-        condition: 'Clear',
-        windSpeed: 8,
-        windDirection: 'SW',
-        windToward: 'neutral',
-        precipitation: 0,
-        humidity: 55,
-        visibility: 10,
-        hrImpact: 'neutral',
-        hrImpactScore: 5,
-      },
+      weather: toGameWeather(liveWeather ?? getNeutralWeather()),
       lineupStatus: {
-        away: awayLineupConfirmed ? 'confirmed' : lineup?.away?.status === 'projected' ? 'projected' : 'unknown',
-        home: homeLineupConfirmed ? 'confirmed' : lineup?.home?.status === 'projected' ? 'projected' : 'unknown',
+        away: awayLineupConfirmed
+          ? 'confirmed'
+          : lineup?.away?.status === 'projected'
+            ? 'projected'
+            : 'unknown',
+        home: homeLineupConfirmed
+          ? 'confirmed'
+          : lineup?.home?.status === 'projected'
+            ? 'projected'
+            : 'unknown',
       },
       awayScore: g.awayScore,
       homeScore: g.homeScore,
@@ -773,7 +856,7 @@ export async function fetchLiveMLBData(): Promise<LiveMLBData> {
     }
 
     // If away lineup is not available, fall back to roster
-    if (awayPlayers.length === 0) {
+    if (allowRosterFallback && awayPlayers.length === 0) {
       try {
         const roster = await fetchTeamRoster(g.awayTeamId);
         for (const p of roster) {
@@ -794,7 +877,7 @@ export async function fetchLiveMLBData(): Promise<LiveMLBData> {
     }
 
     // If home lineup is not available, fall back to roster
-    if (homePlayers.length === 0) {
+    if (allowRosterFallback && homePlayers.length === 0) {
       try {
         const roster = await fetchTeamRoster(g.homeTeamId);
         for (const p of roster) {
@@ -822,8 +905,8 @@ export async function fetchLiveMLBData(): Promise<LiveMLBData> {
     await Promise.allSettled(
       batch.map(async (b) => {
         const [stats, recentForm] = await Promise.all([
-          fetchBatterStats(b.id),
-          fetchBatterRecentForm(b.id),
+          fetchBatterStats(b.id, season),
+          fetchBatterRecentForm(b.id, normalizedTargetDate, season),
         ]);
         const batterId = String(b.id);
         const sc = statcastMap[batterId];

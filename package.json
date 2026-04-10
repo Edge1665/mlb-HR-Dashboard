@@ -46,14 +46,20 @@
     "lint:fix": "next lint --fix",
     "format": "prettier --write \"src/**/*.{ts,tsx,css,md,json}\"",
     "serve": "next start",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "hr:backtest:xgboost": "node --experimental-strip-types --import ./scripts/register-ts-paths.mjs ./scripts/run-xgboost-backtest.ts",
+    "hr:backtest:snapshot-odds": "node --experimental-strip-types --import ./scripts/register-ts-paths.mjs ./scripts/run-snapshot-odds-backtest.ts",
+    "hr:daily-refresh": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/hr-daily-refresh.ps1",
+    "hr:save-official-board": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/hr-save-official-board.ps1",
+    "hr:save-default-boards": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/hr-save-default-boards.ps1"
   },
   "dependencies": {
     "@dhiwise/component-tagger": "^1.0.15",
+    "@fractal-solutions/xgboost-js": "^1.0.0",
     "@heroicons/react": "^2.2.0",
     "@rocketnew/llm-sdk": "^1.0.3",
-    "@supabase/supabase-js": "^2.101.1",
     "@supabase/ssr": "^0.10.0",
+    "@supabase/supabase-js": "^2.101.1",
     "@tailwindcss/forms": "^0.5.10",
     "@tailwindcss/typography": "^0.5.16",
     "lucide-react": "^1.7.0",

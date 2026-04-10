@@ -2,6 +2,7 @@ export interface HRTrainingExample {
   batterId: string;
   batterName: string;
   gameDate: string;
+
   seasonHRPerGame: number;
   barrelRate: number;
   exitVelocityAvg: number;
@@ -9,16 +10,33 @@ export interface HRTrainingExample {
   hardHitRate: number;
   flyBallRate: number;
   xSlugging: number;
+
   pitcherHr9: number;
   pitcherFbPct: number;
+
   parkHrFactor: number;
   weatherHrImpactScore: number;
   projectedAtBats: number;
   platoonEdge: number;
   teamHrPerGame: number;
+
   last7HR: number;
   last14HR: number;
   last30HR: number;
+
+  recentHardHits: number;
+  recentExtraBaseHits: number;
+  fbMatchupFactor: number;
+  recentHrTrend: number;
+  recentPowerScore: number;
+  pitcherRecentRisk: number;
+  platoonPowerInteraction: number;
+  environmentScore: number;
+
+  recentGamesWithHR: number;
+  multiHRGamesLast30: number;
+  recentPitcherHr9: number;
+
   label: 0 | 1;
 }
 
@@ -48,6 +66,13 @@ export interface HRBacktestMetrics {
   brierScore: number;
   accuracyAt50: number;
   top10HitRate: number;
+  averageTop5HitRatePerSlate: number;
+  averageTop10HitRatePerSlate: number;
+  slateCount: number;
+  environmentMetrics: HRSlateEnvironmentMetrics;
+  strategyResults: HRBacktestStrategyResult[];
+  bestSlates: HRBacktestSlateSummary[];
+  worstSlates: HRBacktestSlateSummary[];
   calibrationBuckets: Array<{
     bucketMin: number;
     bucketMax: number;
@@ -57,10 +82,63 @@ export interface HRBacktestMetrics {
   }>;
 }
 
+export interface HRBacktestSlateSummary {
+  gameDate: string;
+  predictionCount: number;
+  estimatedGameCount: number;
+  totalActualHRs: number;
+  top5HitCount: number;
+  top5HitRate: number;
+  top5AveragePredictedProbability: number;
+  top10HitCount: number;
+  top10HitRate: number;
+  top10AveragePredictedProbability: number;
+  averageParkHrFactor: number;
+  averageWeatherHrImpactScore: number;
+  averagePitcherHr9: number;
+  averageSeasonHrPerGame: number;
+  averagePredictedHrProbability: number;
+  predictedHrEnvironmentScore: number;
+  actualEnvironmentLabel: 'low_hr' | 'medium_hr' | 'high_hr';
+  predictedEnvironmentLabel: 'low_hr' | 'medium_hr' | 'high_hr';
+}
+
+export interface HRSlateEnvironmentMetrics {
+  lowHrTop10HitRate: number;
+  mediumHrTop10HitRate: number;
+  highHrTop10HitRate: number;
+  predictedLowHrTop10HitRate: number;
+  predictedMediumHrTop10HitRate: number;
+  predictedHighHrTop10HitRate: number;
+  predictedClassificationAccuracy: number;
+  percentileHitRates: {
+    top25: number;
+    middle50: number;
+    bottom25: number;
+    top20: number;
+    bottom20: number;
+    top10: number;
+    bottom10: number;
+  };
+}
+
+export interface HRBacktestStrategyResult {
+  strategy: 'A' | 'B' | 'C';
+  description: string;
+  totalHits: number;
+  totalBets: number;
+  hitRate: number;
+  roi: number;
+}
+
 export interface HRPredictionWithLabel {
   batterId: string;
   batterName: string;
   gameDate: string;
   predictedProbability: number;
   actualLabel: 0 | 1;
+  parkHrFactor: number;
+  weatherHrImpactScore: number;
+  pitcherHr9: number;
+  seasonHRPerGame: number;
 }
