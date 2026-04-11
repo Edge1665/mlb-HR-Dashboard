@@ -109,11 +109,78 @@ type SaveDefaultBoardsResponse = {
   }>;
 };
 
+type CachedDashboardPayload = {
+  savedAt: string;
+  sortMode: SortMode;
+  lineupMode: LineupMode;
+  selectedSportsbooks: string[];
+  selectedBoard: DailyBoardResponse;
+  modelBoard: DailyBoardResponse;
+  bestBoard: DailyBoardResponse;
+  yesterdaySnapshots: {
+    date: string | null;
+    model: BoardSnapshotSummary | null;
+    best: BoardSnapshotSummary | null;
+  };
+};
+
+const DASHBOARD_CACHE_KEY_PREFIX = 'hr-dashboard-cache-v1';
+
 function getPreviousDateString(value: string): string {
   const [year, month, day] = value.split('-').map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
   date.setUTCDate(date.getUTCDate() - 1);
   return date.toISOString().slice(0, 10);
+}
+
+function getTodayEtDateString(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
+function buildDashboardCacheKey(
+  sortMode: SortMode,
+  lineupMode: LineupMode,
+  selectedSportsbooks: string[]
+): string {
+  const booksKey = [...selectedSportsbooks].sort().join(',');
+  return `${DASHBOARD_CACHE_KEY_PREFIX}:${sortMode}:${lineupMode}:${booksKey}`;
+}
+
+function readCachedDashboard(
+  sortMode: SortMode,
+  lineupMode: LineupMode,
+  selectedSportsbooks: string[]
+): CachedDashboardPayload | null {
+  if (typeof window === 'undefined') return null;
+
+  const raw = window.localStorage.getItem(
+    buildDashboardCacheKey(sortMode, lineupMode, selectedSportsbooks)
+  );
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as CachedDashboardPayload;
+    if (parsed.selectedBoard?.targetDate !== getTodayEtDateString()) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedDashboard(payload: CachedDashboardPayload) {
+  if (typeof window === 'undefined') return;
+
+  window.localStorage.setItem(
+    buildDashboardCacheKey(payload.sortMode, payload.lineupMode, payload.selectedSportsbooks),
+    JSON.stringify(payload)
+  );
 }
 
 function getOddsBanner(data: DailyBoardResponse | null): {
@@ -335,8 +402,27 @@ export default function BestBetsDashboardClient() {
   const [showTopOnly, setShowTopOnly] = useState(false);
   const [showGlossary, setShowGlossary] = useState(false);
   const [selectedSportsbooks, setSelectedSportsbooks] = useState<string[]>([]);
+  const [boardLockedAt, setBoardLockedAt] = useState<string | null>(null);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (options?: { force?: boolean }) => {
+    const forceRefresh = options?.force === true;
+    const cached = !forceRefresh
+      ? readCachedDashboard(sortMode, lineupMode, selectedSportsbooks)
+      : null;
+
+    if (cached) {
+      setData(cached.selectedBoard);
+      setComparisonBoards({
+        model: cached.modelBoard,
+        best: cached.bestBoard,
+      });
+      setYesterdaySnapshots(cached.yesterdaySnapshots);
+      setBoardLockedAt(cached.savedAt);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
@@ -396,6 +482,22 @@ export default function BestBetsDashboardClient() {
         model: modelSnapshot,
         best: bestSnapshot,
       });
+      const cachedPayload: CachedDashboardPayload = {
+        savedAt: new Date().toISOString(),
+        sortMode,
+        lineupMode,
+        selectedSportsbooks,
+        selectedBoard,
+        modelBoard,
+        bestBoard,
+        yesterdaySnapshots: {
+          date: yesterdayDate,
+          model: modelSnapshot,
+          best: bestSnapshot,
+        },
+      };
+      writeCachedDashboard(cachedPayload);
+      setBoardLockedAt(cachedPayload.savedAt);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load dashboard');
     } finally {
@@ -405,6 +507,10 @@ export default function BestBetsDashboardClient() {
 
   useEffect(() => {
     fetchData();
+  }, [fetchData]);
+
+  const handleManualRefresh = useCallback(() => {
+    void fetchData({ force: true });
   }, [fetchData]);
 
   const handleSaveOfficialBoards = useCallback(async () => {
@@ -477,6 +583,9 @@ export default function BestBetsDashboardClient() {
   const lastUpdated = data?.generatedAt
     ? new Date(data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : null;
+  const lockedAtLabel = boardLockedAt
+    ? new Date(boardLockedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : null;
   const savedAtLabel = lastSavedAt
     ? new Date(lastSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : null;
@@ -504,7 +613,7 @@ export default function BestBetsDashboardClient() {
           <p className="text-lg font-medium text-red-400">Failed to load dashboard</p>
           <p className="mt-1 text-sm text-slate-500">{error ?? 'Unknown error'}</p>
           <button
-            onClick={fetchData}
+            onClick={handleManualRefresh}
             className="mt-4 inline-flex items-center gap-2 rounded-lg border border-brand-500/20 bg-brand-500/10 px-4 py-2 text-sm font-medium text-brand-400 hover:bg-brand-500/20"
           >
             <RefreshCw size={14} />
@@ -528,6 +637,11 @@ export default function BestBetsDashboardClient() {
             <p className="mt-2 text-sm text-slate-400">
               This dashboard uses the same backend as the daily board, with the default view focused
               on `best` bets instead of the older projection pipeline.
+            </p>
+            <p className="mt-3 text-xs text-slate-500">
+              {lockedAtLabel
+                ? `Board locked from ${lockedAtLabel}. Refreshing the page will keep this version until you click Refresh board now.`
+                : 'Once loaded, this board stays fixed until you manually refresh it.'}
             </p>
           </div>
 
@@ -561,11 +675,12 @@ export default function BestBetsDashboardClient() {
               {savingBoards ? 'Saving boards...' : 'Save Official Boards'}
             </button>
             <button
-              onClick={fetchData}
-              className="inline-flex items-center justify-center gap-2 rounded-lg border border-brand-500/20 bg-brand-500/10 px-3 py-2 text-sm font-medium text-brand-400 hover:bg-brand-500/20"
+              onClick={handleManualRefresh}
+              disabled={loading}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-brand-500/20 bg-brand-500/10 px-3 py-2 text-sm font-medium text-brand-400 hover:bg-brand-500/20 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <RefreshCw size={14} />
-              Refresh
+              {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              Refresh board now
             </button>
           </div>
         </div>
@@ -573,6 +688,7 @@ export default function BestBetsDashboardClient() {
         <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
           <span>Date: {data.targetDate}</span>
           <span>Generated: {lastUpdated ?? '--'}</span>
+          <span>Locked: {lockedAtLabel ?? '--'}</span>
           <span>Model trained: {data.modelTrainedAt ? new Date(data.modelTrainedAt).toLocaleString() : '--'}</span>
           <span>Training rows: {data.trainingExampleCount}</span>
           {saveStatus === 'saved' && (
