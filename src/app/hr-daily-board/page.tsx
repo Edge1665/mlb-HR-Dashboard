@@ -1,4 +1,5 @@
-import { getTeamAbbreviation } from '@/services/mlbTeamMetadata';
+export { default } from './HRDailyBoardClient';
+/*
 
 async function getDailyBoard(sort: string, lineupMode?: string, sportsbooks?: string) {
   const params = new URLSearchParams({ sort });
@@ -179,3 +180,4 @@ export default async function HRDailyBoardPage({
     </main>
   );
 }
+*/
