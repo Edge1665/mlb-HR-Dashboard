@@ -1,4 +1,19 @@
-export { default } from './HRDailyBoardClient';
+import { Suspense } from 'react';
+import HRDailyBoardClient from './HRDailyBoardClient';
+
+export default function HRDailyBoardPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="p-6">
+          <p className="text-sm text-slate-300">Loading Daily HR Board...</p>
+        </main>
+      }
+    >
+      <HRDailyBoardClient />
+    </Suspense>
+  );
+}
 /*
 
 async function getDailyBoard(sort: string, lineupMode?: string, sportsbooks?: string) {
