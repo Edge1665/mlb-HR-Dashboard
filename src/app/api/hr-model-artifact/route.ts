@@ -35,17 +35,18 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
-    const trainingStartDate = typeof body?.trainingStartDate === 'string'
-      ? body.trainingStartDate
-      : undefined;
-    const trainingEndDate = typeof body?.trainingEndDate === 'string'
-      ? body.trainingEndDate
-      : undefined;
+    const trainingStartDate =
+      typeof body?.trainingStartDate === 'string' ? body.trainingStartDate : undefined;
+    const trainingEndDate =
+      typeof body?.trainingEndDate === 'string' ? body.trainingEndDate : undefined;
+    const featureSetName =
+      typeof body?.featureSetName === 'string' ? body.featureSetName : undefined;
 
     const { artifact } = await trainAndSaveHRModelArtifact({
       trainingStartDate,
       trainingEndDate,
       minRows: 500,
+      featureSetName,
     });
 
     return NextResponse.json({
@@ -58,4 +59,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }
-

@@ -23,9 +23,26 @@ export interface Ballpark {
   city: string;
   teamId: string;
   hrFactor: number;
+  hrFactorVsLeft?: number;
+  hrFactorVsRight?: number;
   hrFactorTier: 'hitter' | 'neutral' | 'pitcher';
   elevation: number;
   dimensions: { leftField: number; centerField: number; rightField: number };
+  dimensionContext?: {
+    leftFieldLine?: number;
+    leftCenterGap?: number;
+    centerField?: number;
+    rightCenterGap?: number;
+    rightFieldLine?: number;
+    averageFenceDistance?: number;
+    fenceDistanceIndex?: number;
+    estimatedHrFriendlyCarry?: number;
+  };
+  parkComps?: {
+    estimatedHrParksForTypical400FtFly?: number;
+    source?: string;
+    isPlaceholder?: boolean;
+  };
 }
 
 export interface Pitcher {
@@ -50,6 +67,13 @@ export interface Pitcher {
   last7: {
     era: number;
     hr9: number;
+  };
+  pitchMix?: Partial<Record<'FF' | 'SI' | 'FC' | 'SL' | 'CU' | 'CH' | 'FS' | 'KC', number>>;
+  handednessHrAllowed?: {
+    vsLeftHr9?: number;
+    vsRightHr9?: number;
+    source?: string;
+    isPlaceholder?: boolean;
   };
 }
 
@@ -97,6 +121,7 @@ export interface Batter {
   last14: { avg: number; hr: number; ops: number };
   last30: { avg: number; hr: number; ops: number };
   recentGameLog: GameLogEntry[];
+  pitchTypeSkill?: Partial<Record<'FF' | 'SI' | 'FC' | 'SL' | 'CU' | 'CH' | 'FS' | 'KC', number>>;
 }
 
 export interface GameLogEntry {
@@ -118,9 +143,14 @@ export interface Weather {
   windSpeed: number;
   windDirection: WindDirection;
   windToward: 'in' | 'out' | 'crosswind' | 'neutral';
+  windOutToCenter?: number;
+  windInFromCenter?: number;
+  crosswind?: number;
   precipitation: number;
   humidity: number;
   visibility: number;
+  densityAltitude?: number;
+  airDensityProxy?: number;
   hrImpact: 'positive' | 'neutral' | 'negative';
   hrImpactScore: number;
 }

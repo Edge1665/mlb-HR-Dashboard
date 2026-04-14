@@ -1,7 +1,7 @@
 import type { HRPredictionInput } from '@/services/hrPredictionService';
 import type { HRTrainingExample } from './types';
 
-export const HR_MODEL_FEATURES = [
+const HR_MODEL_CORE_FEATURES = [
   'seasonHRPerGame',
   'barrelRate',
   'exitVelocityAvg',
@@ -27,7 +27,98 @@ export const HR_MODEL_FEATURES = [
   'recentPitcherHr9',
 ] as const;
 
+export const HR_MODEL_EXPERIMENTAL_WEATHER_FEATURES = [
+  'temperature',
+  'humidity',
+  'windSpeed',
+  'windOutToCenter',
+  'windInFromCenter',
+  'crosswind',
+  'pullSideWindBoost',
+  'airDensityProxy',
+  'densityAltitude',
+] as const;
+
+export const HR_MODEL_EXPERIMENTAL_PARK_FEATURES = [
+  'parkIdNumeric',
+  'parkHrFactorVsHand',
+  'averageFenceDistance',
+  'fenceDistanceIndex',
+  'estimatedHrParksForTypical400FtFly',
+] as const;
+
+export const HR_MODEL_EXPERIMENTAL_MATCHUP_FEATURES = [
+  'handednessInteraction',
+  'pitchMixMatchupScore',
+  'pitcherVulnerabilityVsHand',
+  'batterVsPitchMixPower',
+] as const;
+
+export const HR_MODEL_EXPERIMENTAL_FEATURES = [
+  ...HR_MODEL_EXPERIMENTAL_WEATHER_FEATURES,
+  ...HR_MODEL_EXPERIMENTAL_PARK_FEATURES,
+  ...HR_MODEL_EXPERIMENTAL_MATCHUP_FEATURES,
+] as const;
+
+export const HR_MODEL_FEATURES = [
+  ...HR_MODEL_CORE_FEATURES,
+  ...HR_MODEL_EXPERIMENTAL_FEATURES,
+] as const;
+
 export type HRModelFeatureName = (typeof HR_MODEL_FEATURES)[number];
+
+export const HR_MODEL_FEATURES_V1_BASELINE: readonly HRModelFeatureName[] = [
+  ...HR_MODEL_CORE_FEATURES,
+];
+
+export const HR_MODEL_FEATURES_REDUCED_COMPOSITES: readonly HRModelFeatureName[] =
+  HR_MODEL_CORE_FEATURES.filter(
+    (featureName) =>
+      ![
+        'recentHardHits',
+        'recentExtraBaseHits',
+        'platoonPowerInteraction',
+        'environmentScore',
+      ].includes(featureName)
+  );
+
+export const HR_MODEL_FEATURES_V2_CLEAN: readonly HRModelFeatureName[] =
+  HR_MODEL_FEATURES_REDUCED_COMPOSITES;
+
+export const HR_MODEL_FEATURES_PRODUCTION_DEFAULT: readonly HRModelFeatureName[] =
+  [...HR_MODEL_FEATURES_V2_CLEAN];
+
+export const HR_MODEL_FEATURES_PARK_ONLY_SAFE_V1: readonly HRModelFeatureName[] = [
+  ...HR_MODEL_FEATURES_V2_CLEAN,
+  'parkHrFactorVsHand',
+  'averageFenceDistance',
+  'fenceDistanceIndex',
+  'estimatedHrParksForTypical400FtFly',
+];
+
+export const HR_MODEL_FEATURES_ENV_MATCHUP_V1: readonly HRModelFeatureName[] = [
+  ...HR_MODEL_FEATURES_V2_CLEAN,
+  ...HR_MODEL_EXPERIMENTAL_FEATURES,
+];
+
+export const HR_MODEL_FEATURE_SET_REGISTRY = {
+  production_default: HR_MODEL_FEATURES_PRODUCTION_DEFAULT,
+  park_only_safe_v1: HR_MODEL_FEATURES_PARK_ONLY_SAFE_V1,
+  env_matchup_v1: HR_MODEL_FEATURES_ENV_MATCHUP_V1,
+} as const satisfies Record<string, readonly HRModelFeatureName[]>;
+
+export type HRModelFeatureSetName = keyof typeof HR_MODEL_FEATURE_SET_REGISTRY;
+
+export function getHRModelFeatureSet(
+  featureSetName: HRModelFeatureSetName = 'production_default'
+): readonly HRModelFeatureName[] {
+  return HR_MODEL_FEATURE_SET_REGISTRY[featureSetName];
+}
+
+export const HR_MODEL_FEATURES_LESS_RECENT_HR_NOISE: readonly HRModelFeatureName[] =
+  HR_MODEL_CORE_FEATURES.filter(
+    (featureName) => !['last7HR', 'last30HR'].includes(featureName)
+  );
 
 const LINEUP_PA_MAP: Record<number, number> = {
   1: 4.4,
@@ -60,6 +151,56 @@ function regressRate(
 ): number {
   const stabilizedWeight = safeDivide(sampleSize, sampleSize + stabilization, 0);
   return observedRate * stabilizedWeight + priorRate * (1 - stabilizedWeight);
+}
+
+function parseParkIdNumeric(value: string | undefined): number {
+  const numeric = Number(value ?? 0);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function normalizeOptionalRate(value: number | undefined): number | undefined {
+  if (value == null || !Number.isFinite(value) || value <= 0) {
+    return undefined;
+  }
+
+  return value;
+}
+
+function getPullDirectionSign(bats?: 'L' | 'R' | 'S'): number {
+  if (bats === 'L') return -1;
+  return 1;
+}
+
+function getPitchMixWeightedSkill(
+  pitcherPitchMix?: Partial<Record<'FF' | 'SI' | 'FC' | 'SL' | 'CU' | 'CH' | 'FS' | 'KC', number>>,
+  batterPitchTypeSkill?: Partial<Record<'FF' | 'SI' | 'FC' | 'SL' | 'CU' | 'CH' | 'FS' | 'KC', number>>
+): { weightedSkill: number; knownUsage: number } {
+  const pitchTypes: Array<'FF' | 'SI' | 'FC' | 'SL' | 'CU' | 'CH' | 'FS' | 'KC'> = [
+    'FF',
+    'SI',
+    'FC',
+    'SL',
+    'CU',
+    'CH',
+    'FS',
+    'KC',
+  ];
+
+  let weightedTotal = 0;
+  let totalUsage = 0;
+
+  for (const pitchType of pitchTypes) {
+    const usage = pitcherPitchMix?.[pitchType];
+    if (usage == null || !Number.isFinite(usage) || usage <= 0) continue;
+    const skill = batterPitchTypeSkill?.[pitchType] ?? 0;
+    weightedTotal += usage * skill;
+    totalUsage += usage;
+  }
+
+  return {
+    weightedSkill: totalUsage > 0 ? weightedTotal / totalUsage : 0,
+    knownUsage: totalUsage,
+  };
 }
 
 export function getProjectedAtBats(lineupPosition?: number | null): number {
@@ -103,9 +244,42 @@ export function buildHRFeatureExample(
 
   // Tightened weather range so it cannot blow up final probabilities.
   const weatherHrImpactScore = clamp(input.weather?.hrImpactScore ?? 0, -2, 2);
+  const temperature = clamp(input.weather?.temp ?? 70, 20, 110);
+  const humidity = clamp(input.weather?.humidity ?? 50, 0, 100);
+  const windSpeed = clamp(input.weather?.windSpeed ?? 0, 0, 40);
+  const windOutToCenter = clamp(input.weather?.windOutToCenter ?? 0, 0, 40);
+  const windInFromCenter = clamp(input.weather?.windInFromCenter ?? 0, 0, 40);
+  const crosswind = clamp(input.weather?.crosswind ?? 0, -40, 40);
+  const densityAltitude = clamp(input.weather?.densityAltitude ?? 0, -2000, 12000);
+  const airDensityProxy = clamp(input.weather?.airDensityProxy ?? 1, 0.82, 1.12);
 
   const projectedAtBats = getProjectedAtBats(input.lineupPosition);
   const platoonEdge = getPlatoonEdge(input.platoon?.bats, input.platoon?.pitcherThrows);
+  const handednessInteraction = clamp(input.platoon?.handednessInteraction ?? 0, -1, 1);
+  // Treat missing/placeholder pull-rate values as unknown so we fall back to neutral.
+  const pullRate = clamp(normalizeOptionalRate(input.power?.pullRate) ?? 40, 20, 65);
+  const pullSideWindBoost = clamp(
+    windOutToCenter * 0.05 +
+      getPullDirectionSign(input.platoon?.bats) * crosswind * 0.02 +
+      (pullRate - 40) * 0.015,
+    -2,
+    2
+  );
+  const parkIdNumeric = parseParkIdNumeric(input.ballpark?.id);
+  const parkHrFactorVsHand = clamp(
+    input.platoon?.bats === 'L'
+      ? input.ballpark?.hrFactorVsLeft ?? parkHrFactor
+      : input.ballpark?.hrFactorVsRight ?? parkHrFactor,
+    0.7,
+    1.5
+  );
+  const averageFenceDistance = clamp(input.ballpark?.averageFenceDistance ?? 352, 300, 430);
+  const fenceDistanceIndex = clamp(input.ballpark?.fenceDistanceIndex ?? 0, -2, 2);
+  const estimatedHrParksForTypical400FtFly = clamp(
+    input.ballpark?.estimatedHrParksForTypical400FtFly ?? 15,
+    1,
+    30
+  );
 
   const last7HR = clamp(input.recentForm?.last7HR ?? 0, 0, 10);
   const last14HR = clamp(input.recentForm?.last14HR ?? 0, 0, 15);
@@ -167,10 +341,30 @@ export function buildHRFeatureExample(
   const environmentScore = clamp(
     (parkHrFactor * 10) +
       (weatherHrImpactScore * 0.8) +
+      (pullSideWindBoost * 0.6) +
+      ((1 - airDensityProxy) * 12) +
       (projectedAtBats * 1.2) +
       (teamHrPerGame * 2.2),
     0,
     25
+  );
+
+  const pitchMixMatchup = getPitchMixWeightedSkill(
+    input.pitchTypeMatchup?.pitcherPitchMix,
+    input.pitchTypeMatchup?.batterPitchTypeSkill
+  );
+  const pitchMixMatchupScore = clamp(pitchMixMatchup.weightedSkill, -2, 2);
+  const batterVsPitchMixPower = clamp(
+    pitchMixMatchup.knownUsage > 0 ? pitchMixMatchup.weightedSkill : 0,
+    -2,
+    2
+  );
+  const pitcherVulnerabilityVsHand = clamp(
+    input.platoon?.bats === 'L'
+      ? input.pitcher?.hr9AllowedVsLeft ?? input.pitcher?.hr9 ?? 1.1
+      : input.pitcher?.hr9AllowedVsRight ?? input.pitcher?.hr9 ?? 1.1,
+    0,
+    3
   );
 
   return {
@@ -191,8 +385,23 @@ export function buildHRFeatureExample(
 
     parkHrFactor,
     weatherHrImpactScore,
+    temperature,
+    humidity,
+    windSpeed,
+    windOutToCenter,
+    windInFromCenter,
+    crosswind,
+    pullSideWindBoost,
+    airDensityProxy,
+    densityAltitude,
+    parkIdNumeric,
+    parkHrFactorVsHand,
+    averageFenceDistance,
+    fenceDistanceIndex,
+    estimatedHrParksForTypical400FtFly,
     projectedAtBats,
     platoonEdge,
+    handednessInteraction,
     teamHrPerGame,
 
     last7HR,
@@ -207,6 +416,9 @@ export function buildHRFeatureExample(
     pitcherRecentRisk,
     platoonPowerInteraction,
     environmentScore,
+    pitchMixMatchupScore,
+    pitcherVulnerabilityVsHand,
+    batterVsPitchMixPower,
 
     recentGamesWithHR: 0,
     multiHRGamesLast30: 0,

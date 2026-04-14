@@ -154,7 +154,7 @@ export default async function HRDailyBoardPage({
               <th className="border p-2 text-left">Team</th>
               <th className="border p-2 text-left">Player</th>
               <th className="border p-2 text-left">Lineup</th>
-              <th className="border p-2 text-left">Model</th>
+              <th className="border p-2 text-left">Est. HR Chance</th>
               <th className="border p-2 text-left">Odds</th>
               <th className="border p-2 text-left">Implied</th>
               <th className="border p-2 text-left">Edge</th>

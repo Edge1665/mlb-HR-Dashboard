@@ -7,11 +7,47 @@ export interface LiveWeatherData {
   windSpeed: number;
   windDirection: string;
   windToward: 'out' | 'in' | 'neutral';
+  windOutToCenter: number;
+  windInFromCenter: number;
+  crosswind: number;
   precipitation: number;
   humidity: number;
   visibility: number;
+  densityAltitude: number;
+  airDensityProxy: number;
   hrImpact: 'poor' | 'neutral' | 'good' | 'great';
   hrImpactScore: number;
+}
+
+export interface GameWeather {
+  tempF: number;
+  feelsLikeF: number;
+  condition: string;
+  windSpeedMph: number;
+  windDirection: string;
+  windToward: 'out' | 'in' | 'neutral';
+  windOutToCenter: number;
+  windInFromCenter: number;
+  crosswind: number;
+  precipitationInches: number;
+  humidityPct: number;
+  visibilityMiles: number;
+  densityAltitude: number;
+  airDensityProxy: number;
+  hrImpact: 'poor' | 'neutral' | 'good' | 'great';
+  hrImpactScore: number;
+}
+
+export interface WeatherUnavailable {
+  unavailable: true;
+  reason?: string;
+}
+
+export type WeatherResult = GameWeather | WeatherUnavailable;
+
+export interface GameWeatherInput {
+  gamePk: number;
+  homeTeamId: number | string;
 }
 
 type OpenWeatherCurrentResponse = {
@@ -53,6 +89,61 @@ function estimateWindToward(windDeg?: number): 'out' | 'in' | 'neutral' {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function toGameWeather(weather: LiveWeatherData): GameWeather {
+  return {
+    tempF: weather.temp,
+    feelsLikeF: weather.feelsLike,
+    condition: weather.condition,
+    windSpeedMph: weather.windSpeed,
+    windDirection: weather.windDirection,
+    windToward: weather.windToward,
+    windOutToCenter: weather.windOutToCenter,
+    windInFromCenter: weather.windInFromCenter,
+    crosswind: weather.crosswind,
+    precipitationInches: weather.precipitation,
+    humidityPct: weather.humidity,
+    visibilityMiles: weather.visibility,
+    densityAltitude: weather.densityAltitude,
+    airDensityProxy: weather.airDensityProxy,
+    hrImpact: weather.hrImpact,
+    hrImpactScore: weather.hrImpactScore,
+  };
+}
+
+function getWindVectorComponents(windDeg?: number, windSpeed = 0) {
+  if (typeof windDeg !== 'number' || !Number.isFinite(windDeg) || !Number.isFinite(windSpeed)) {
+    return {
+      windOutToCenter: 0,
+      windInFromCenter: 0,
+      crosswind: 0,
+    };
+  }
+
+  // Approximate center-field orientation as 200 degrees.
+  const centerFieldBearingDeg = 200;
+  const relativeRad = ((windDeg - centerFieldBearingDeg) * Math.PI) / 180;
+  const rawOutComponent = Math.cos(relativeRad) * windSpeed;
+  const rawCrosswind = Math.sin(relativeRad) * windSpeed;
+
+  return {
+    windOutToCenter: Math.max(0, rawOutComponent),
+    windInFromCenter: Math.max(0, -rawOutComponent),
+    crosswind: rawCrosswind,
+  };
+}
+
+function estimateDensityAltitude(temp: number, humidity: number): number {
+  // Rough proxy: warmer/more humid air behaves like higher altitude.
+  return Math.round((temp - 59) * 120 + (humidity - 50) * 12);
+}
+
+function estimateAirDensityProxy(temp: number, humidity: number, densityAltitude: number): number {
+  const tempPenalty = (temp - 70) * -0.003;
+  const humidityPenalty = (humidity - 50) * -0.0012;
+  const altitudePenalty = densityAltitude * -0.00003;
+  return clamp(Number((1 + tempPenalty + humidityPenalty + altitudePenalty).toFixed(3)), 0.82, 1.12);
 }
 
 function calculateHRImpactScore(input: {
@@ -143,8 +234,11 @@ export async function fetchWeatherForTeamHomePark(teamId: string): Promise<LiveW
   const windDeg = json.wind?.deg;
   const windDirection = typeof windDeg === 'number' ? degreesToCompass(windDeg) : 'N/A';
   const windToward = estimateWindToward(windDeg);
+  const windComponents = getWindVectorComponents(windDeg, windSpeed);
   const precipitation = json.rain?.['1h'] ?? json.snow?.['1h'] ?? 0;
   const condition = json.weather?.[0]?.main ?? 'Unknown';
+  const densityAltitude = estimateDensityAltitude(temp, humidity);
+  const airDensityProxy = estimateAirDensityProxy(temp, humidity, densityAltitude);
 
   const { hrImpact, hrImpactScore } = calculateHRImpactScore({
     temp,
@@ -161,9 +255,14 @@ export async function fetchWeatherForTeamHomePark(teamId: string): Promise<LiveW
     windSpeed,
     windDirection,
     windToward,
+    windOutToCenter: windComponents.windOutToCenter,
+    windInFromCenter: windComponents.windInFromCenter,
+    crosswind: windComponents.crosswind,
     precipitation,
     humidity,
     visibility,
+    densityAltitude,
+    airDensityProxy,
     hrImpact,
     hrImpactScore,
   };
@@ -177,10 +276,58 @@ export function getNeutralWeather(): LiveWeatherData {
     windSpeed: 0,
     windDirection: 'N/A',
     windToward: 'neutral',
+    windOutToCenter: 0,
+    windInFromCenter: 0,
+    crosswind: 0,
     precipitation: 0,
     humidity: 50,
     visibility: 10,
+    densityAltitude: 0,
+    airDensityProxy: 1,
     hrImpact: 'neutral',
     hrImpactScore: 0,
   };
+}
+
+export async function fetchWeatherForAllGames(
+  inputs: GameWeatherInput[]
+): Promise<Map<number, WeatherResult>> {
+  const weatherMap = new Map<number, WeatherResult>();
+
+  if (!Array.isArray(inputs) || inputs.length === 0) {
+    return weatherMap;
+  }
+
+  const results = await Promise.allSettled(
+    inputs.map(async (input) => {
+      const weather = await fetchWeatherForTeamHomePark(String(input.homeTeamId));
+
+      return {
+        gamePk: input.gamePk,
+        weather: weather
+          ? toGameWeather(weather)
+          : ({
+              unavailable: true,
+              reason: 'Weather data unavailable',
+            } satisfies WeatherUnavailable),
+      };
+    })
+  );
+
+  for (let i = 0; i < inputs.length; i += 1) {
+    const input = inputs[i];
+    const result = results[i];
+
+    if (result.status === 'fulfilled') {
+      weatherMap.set(input.gamePk, result.value.weather);
+      continue;
+    }
+
+    weatherMap.set(input.gamePk, {
+      unavailable: true,
+      reason: 'Weather lookup failed',
+    });
+  }
+
+  return weatherMap;
 }

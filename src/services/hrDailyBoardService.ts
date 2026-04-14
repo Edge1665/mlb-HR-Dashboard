@@ -22,9 +22,20 @@ import {
   serializeSeasonSampleWeights,
   type SeasonSampleWeights,
 } from '@/services/ml/hrSeasonWeights';
+import {
+  buildPriorRankMap,
+  fetchPriorBoardReference,
+  getBoardStabilityFields,
+} from '@/services/hrBoardStabilityService';
+import {
+  summarizeLiveSlateEnvironment,
+  type LiveSlateEnvironmentSummary,
+} from '@/services/ml/hrSlateEnvironmentService';
 
 export type DailyBoardSortMode = 'model' | 'edge' | 'best';
 export type DailyBoardLineupMode = 'confirmed' | 'all';
+
+const DEFAULT_CONSERVATIVE_SHRINKAGE = 0.25;
 
 export interface DailyHRBoardRow {
   rank: number;
@@ -49,6 +60,12 @@ export interface DailyHRBoardRow {
   sportsbookOddsAmerican: number | null;
   impliedProbability: number | null;
   edge: number | null;
+  valueTag: 'strong_value' | 'slight_value' | 'fair' | 'negative_value' | 'no_odds';
+  morningRank: number | null;
+  currentRank: number | null;
+  rankChange: number | null;
+  wasInMorningTop10: boolean;
+  wasInMorningTop20: boolean;
   combinedScore: number | null;
   sportsbook: string | null;
   lineupConfirmed: boolean;
@@ -73,6 +90,27 @@ export interface DailyHROddsStatus {
   cacheTtlMinutes: number;
 }
 
+export interface DailyHRBoardResponse {
+  targetDate: string;
+  sportsbooks: string[];
+  generatedAt: string;
+  trainingStartDate: string;
+  trainingExampleCount: number;
+  modelTrainedAt: string;
+  seasonSampleWeights: SeasonSampleWeights;
+  odds: DailyHROddsStatus;
+  sortMode: DailyBoardSortMode;
+  lineupMode: DailyBoardLineupMode;
+  confirmedCount: number;
+  unconfirmedCount: number;
+  slateEnvironment: LiveSlateEnvironmentSummary;
+  predictedSlateEnvironment: LiveSlateEnvironmentSummary['slateClass'];
+  recommendedTopPlaysMin: number;
+  recommendedTopPlaysMax: number;
+  shouldConsiderSkippingSlate: boolean;
+  rows: DailyHRBoardRow[];
+}
+
 interface CachedBoardPayload {
   builtAtMs: number;
   targetDate: string;
@@ -84,6 +122,13 @@ interface CachedBoardPayload {
   seasonSampleWeights: SeasonSampleWeights;
   odds: DailyHROddsStatus;
   rows: DailyHRBoardRow[];
+}
+
+interface GameEnvironmentAdjustment {
+  multiplier: number;
+  weatherScore: number;
+  parkFactor: number;
+  averagePitcherHr9: number;
 }
 
 const BOARD_CACHE_TTL_MS = 60 * 1000;
@@ -104,6 +149,26 @@ function getTodayETDateString(): string {
   const mm = String(etDate.getMonth() + 1).padStart(2, '0');
   const dd = String(etDate.getDate()).padStart(2, '0');
   return `${yyyy}-${mm}-${dd}`;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function remapDisplayedHrProbability(internalProbability: number): number {
+  const clamped = clamp(internalProbability, 0, 0.6);
+
+  if (clamped <= 0) {
+    return 0;
+  }
+
+  // Preserve ordering but compress the display layer into a realistic single-game HR range.
+  const maxDisplayProbability = 0.28;
+  const shape = 2.2;
+  const normalized =
+    (1 - Math.exp(-shape * clamped)) / (1 - Math.exp(-shape * 0.6));
+
+  return clamp(maxDisplayProbability * normalized, 0, maxDisplayProbability);
 }
 
 function getSeasonFromDate(value: string): number {
@@ -179,11 +244,75 @@ function buildReasons(example: HRTrainingExample): string[] {
   return reasons.slice(0, 4);
 }
 
-function getCombinedScore(row: DailyHRBoardRow): number | null {
-  if (row.edge == null || row.edge <= 0) return null;
+function enrichReasonsWithGameEnvironment(
+  reasons: string[],
+  gameEnvironment: GameEnvironmentAdjustment
+): string[] {
+  const enhanced = [...reasons];
 
-  const positiveEdge = row.edge;
-  return row.predictedProbability + positiveEdge * 1.5;
+  if (gameEnvironment.multiplier >= 1.07) {
+    enhanced.push(`HR-friendly game environment (${gameEnvironment.multiplier.toFixed(2)}x)`);
+  } else if (gameEnvironment.multiplier <= 0.95) {
+    enhanced.push(`HR-suppressing game environment (${gameEnvironment.multiplier.toFixed(2)}x)`);
+  }
+
+  return enhanced.slice(0, 4);
+}
+
+function buildGameEnvironmentAdjustment(params: {
+  weatherScore?: number | null;
+  parkFactor?: number | null;
+  awayPitcherHr9?: number | null;
+  homePitcherHr9?: number | null;
+}): GameEnvironmentAdjustment {
+  const weatherScore = clamp(params.weatherScore ?? 0, -2, 2);
+  const parkFactor = clamp(params.parkFactor ?? 1, 0.7, 1.5);
+  const pitcherHr9Values = [params.awayPitcherHr9, params.homePitcherHr9].filter(
+    (value): value is number => typeof value === 'number' && Number.isFinite(value)
+  );
+  const averagePitcherHr9 =
+    pitcherHr9Values.length > 0
+      ? pitcherHr9Values.reduce((sum, value) => sum + value, 0) / pitcherHr9Values.length
+      : 1.1;
+
+  // Shared slate-level context:
+  // weather carries the most weight, park is next, and the two probable starters
+  // add a modest game-wide signal without overpowering the hitter-specific model.
+  const weatherAdjustment = weatherScore * 0.035;
+  const parkAdjustment = (parkFactor - 1) * 0.22;
+  const pitcherAdjustment = clamp((averagePitcherHr9 - 1.1) * 0.045, -0.04, 0.05);
+  const multiplier = clamp(
+    1 + weatherAdjustment + parkAdjustment + pitcherAdjustment,
+    0.88,
+    1.14
+  );
+
+  return {
+    multiplier,
+    weatherScore,
+    parkFactor,
+    averagePitcherHr9,
+  };
+}
+
+function getValueTag(edge: number | null): DailyHRBoardRow['valueTag'] {
+  if (edge == null || !Number.isFinite(edge)) {
+    return 'no_odds';
+  }
+
+  if (edge >= 0.03) {
+    return 'strong_value';
+  }
+
+  if (edge > 0) {
+    return 'slight_value';
+  }
+
+  if (edge >= -0.02) {
+    return 'fair';
+  }
+
+  return 'negative_value';
 }
 
 function sortRows(rows: DailyHRBoardRow[], sortMode: DailyBoardSortMode): DailyHRBoardRow[] {
@@ -206,19 +335,17 @@ function sortRows(rows: DailyHRBoardRow[], sortMode: DailyBoardSortMode): DailyH
     return sorted;
   }
 
-  if (sortMode === 'best') {
-    const filtered = rows.filter(
-      (row) =>
-        row.sportsbookOddsAmerican != null &&
-        row.edge != null &&
-        row.edge > 0
-    );
+  const sorted = [...rows];
 
-    const sorted = [...filtered];
+  if (sortMode === 'best') {
     sorted.sort((a, b) => {
-      const aScore = a.combinedScore ?? -999;
-      const bScore = b.combinedScore ?? -999;
-      if (bScore !== aScore) return bScore - aScore;
+      if (b.modelScore !== a.modelScore) {
+        return b.modelScore - a.modelScore;
+      }
+
+      if (b.rawCalibratedProbability !== a.rawCalibratedProbability) {
+        return b.rawCalibratedProbability - a.rawCalibratedProbability;
+      }
 
       const aEdge = a.edge ?? -999;
       const bEdge = b.edge ?? -999;
@@ -230,16 +357,17 @@ function sortRows(rows: DailyHRBoardRow[], sortMode: DailyBoardSortMode): DailyH
     return sorted;
   }
 
-  const sorted = [...rows];
   sorted.sort((a, b) => {
     if (b.modelScore !== a.modelScore) {
       return b.modelScore - a.modelScore;
     }
 
-    const aHasOdds = a.sportsbookOddsAmerican != null ? 1 : 0;
-    const bHasOdds = b.sportsbookOddsAmerican != null ? 1 : 0;
-    if (bHasOdds !== aHasOdds) {
-      return bHasOdds - aHasOdds;
+    if (b.predictedProbability !== a.predictedProbability) {
+      return b.predictedProbability - a.predictedProbability;
+    }
+
+    if (b.rawCalibratedProbability !== a.rawCalibratedProbability) {
+      return b.rawCalibratedProbability - a.rawCalibratedProbability;
     }
 
     const aEdge = a.edge ?? -999;
@@ -256,6 +384,8 @@ function finalizeRows(rows: DailyHRBoardRow[], sortMode: DailyBoardSortMode, lim
     .map((row, index) => ({
       ...row,
       rank: index + 1,
+      currentRank: index + 1,
+      rankChange: row.morningRank != null ? row.morningRank - (index + 1) : null,
       rawCalibratedProbability: Number(row.rawCalibratedProbability.toFixed(3)),
       conservativeProbability: Number(row.conservativeProbability.toFixed(3)),
       predictedProbability: Number(row.predictedProbability.toFixed(3)),
@@ -325,6 +455,23 @@ async function buildFreshBoard(options: {
   const { artifact, model } = loadedArtifact;
 
   const { batters, pitchers, games, ballparks } = await fetchLiveMLBData(targetDate);
+  const gameEnvironmentById = new Map<string, GameEnvironmentAdjustment>();
+
+  for (const game of games) {
+    const ballpark = game.ballparkId ? ballparks[game.ballparkId] : undefined;
+    const awayPitcherHr9 = game.awayPitcherId ? pitchers[game.awayPitcherId]?.hr9 : undefined;
+    const homePitcherHr9 = game.homePitcherId ? pitchers[game.homePitcherId]?.hr9 : undefined;
+
+    gameEnvironmentById.set(
+      String(game.id),
+      buildGameEnvironmentAdjustment({
+        weatherScore: game.weather?.hrImpactScore,
+        parkFactor: ballpark?.hrFactor,
+        awayPitcherHr9,
+        homePitcherHr9,
+      })
+    );
+  }
 
   let oddsLookup: DailyOddsLookup = {
     byPlayerName: {},
@@ -414,16 +561,31 @@ async function buildFreshBoard(options: {
         artifact.standardization,
         artifact.calibration,
         artifact.params.probabilityPower,
+        artifact.params.conservativeShrinkage ?? DEFAULT_CONSERVATIVE_SHRINKAGE,
         artifact.featureNames as HRModelFeatureName[]
       );
-      const modelScore = probabilityDetails.conservativeProbability;
       const rawCalibratedProbability = probabilityDetails.rawCalibratedProbability;
       const conservativeProbability = probabilityDetails.conservativeProbability;
+      const gameEnvironment =
+        gameEnvironmentById.get(String(game.id)) ??
+        buildGameEnvironmentAdjustment({
+          weatherScore: game.weather?.hrImpactScore,
+          parkFactor: ballpark?.hrFactor,
+          awayPitcherHr9: game.awayPitcherId ? pitchers[game.awayPitcherId]?.hr9 : undefined,
+          homePitcherHr9: game.homePitcherId ? pitchers[game.homePitcherId]?.hr9 : undefined,
+        });
+      const adjustedProbability = clamp(
+        conservativeProbability * gameEnvironment.multiplier,
+        0,
+        0.6
+      );
+      const modelScore = adjustedProbability;
+      const displayedProbability = remapDisplayedHrProbability(adjustedProbability);
 
       const odds = findBestOddsMatch(oddsLookup.byPlayerName, example.batterName);
       const impliedProbability = odds?.impliedProbability ?? null;
       const edge =
-        impliedProbability != null ? conservativeProbability - impliedProbability : null;
+        impliedProbability != null ? adjustedProbability - impliedProbability : null;
 
       const row: DailyHRBoardRow = {
         rank: 0,
@@ -442,12 +604,14 @@ async function buildFreshBoard(options: {
         modelScore,
         rawCalibratedProbability,
         conservativeProbability,
-        predictedProbability: conservativeProbability,
-        tier: getHRProbabilityTier(conservativeProbability),
-        reasons: buildReasons(example),
+        predictedProbability: displayedProbability,
+        tier: getHRProbabilityTier(adjustedProbability),
+        reasons: enrichReasonsWithGameEnvironment(buildReasons(example), gameEnvironment),
         sportsbookOddsAmerican: odds?.americanOdds ?? null,
         impliedProbability,
         edge,
+        valueTag: getValueTag(edge),
+        ...getBoardStabilityFields(String(example.batterId), null),
         combinedScore: null,
         sportsbook: odds?.sportsbook ?? null,
         lineupConfirmed: batter.lineupConfirmed !== false,
@@ -466,7 +630,6 @@ async function buildFreshBoard(options: {
         },
       };
 
-      row.combinedScore = getCombinedScore(row);
       return row;
     }
   );
@@ -517,7 +680,7 @@ export async function buildDailyHRBoard(options?: {
   lineupMode?: DailyBoardLineupMode;
   sportsbooks?: string[];
   seasonSampleWeights?: SeasonSampleWeights;
-}) {
+}): Promise<DailyHRBoardResponse> {
   const targetDate = options?.targetDate ?? getTodayETDateString();
   const trainingStartDate = options?.trainingStartDate ?? '2024-03-28';
   const limit = options?.limit ?? 25;
@@ -535,24 +698,58 @@ export async function buildDailyHRBoard(options?: {
 
   const confirmedRows = filterRowsByLineupMode(cachedBoard.rows, 'confirmed');
   const curatedAllRows = filterRowsByLineupMode(cachedBoard.rows, 'all');
-  let effectiveLineupMode = lineupMode;
-  let filteredRows =
-    lineupMode === 'confirmed'
-      ? confirmedRows
-      : curatedAllRows;
+  let priorRankMap: Map<string, number> | null = null;
 
-  const confirmedFinalRows = finalizeRows(confirmedRows, sortMode, limit);
+  try {
+    const priorReference = await fetchPriorBoardReference({
+      targetDate: cachedBoard.targetDate,
+      boardType: sortMode,
+    });
+    priorRankMap = priorReference ? buildPriorRankMap(priorReference.rows) : null;
+  } catch (error) {
+    console.warn(
+      '[hrDailyBoardService] Failed to load prior board reference; continuing without stability context.',
+      error
+    );
+    priorRankMap = null;
+  }
+
+  const applyStabilityContext = (rows: DailyHRBoardRow[]) =>
+    rows.map((row) => ({
+      ...row,
+      ...getBoardStabilityFields(row.batterId, priorRankMap),
+    }));
+
+  const confirmedStableRows = applyStabilityContext(confirmedRows);
+  const curatedAllStableRows = applyStabilityContext(curatedAllRows);
+  let effectiveLineupMode = lineupMode;
+  let stabilityAdjustedRows =
+    lineupMode === 'confirmed'
+      ? confirmedStableRows
+      : curatedAllStableRows;
+
+  const confirmedFinalRows = finalizeRows(confirmedStableRows, sortMode, limit);
   if (
     sortMode === 'best' &&
     lineupMode === 'confirmed' &&
     confirmedFinalRows.length < Math.min(limit, 10)
   ) {
     effectiveLineupMode = 'all';
-    filteredRows = curatedAllRows;
+    stabilityAdjustedRows = curatedAllStableRows;
   }
 
   const confirmedCount = cachedBoard.rows.filter((row) => row.lineupConfirmed).length;
   const unconfirmedCount = cachedBoard.rows.length - confirmedCount;
+  const slateEnvironment = summarizeLiveSlateEnvironment(
+    stabilityAdjustedRows.map((row) => ({
+      gameId: row.gameId,
+      predictedProbability: row.modelScore,
+      seasonHRPerGame: row.features.seasonHRPerGame,
+      parkHrFactor: row.features.parkHrFactor,
+      weatherHrImpactScore: row.features.weatherHrImpactScore,
+      pitcherHr9: row.features.pitcherHr9,
+    }))
+  );
 
   return {
     targetDate: cachedBoard.targetDate,
@@ -571,6 +768,12 @@ export async function buildDailyHRBoard(options?: {
     lineupMode: effectiveLineupMode,
     confirmedCount,
     unconfirmedCount,
-    rows: finalizeRows(filteredRows, sortMode, limit),
+    slateEnvironment,
+    predictedSlateEnvironment: slateEnvironment.slateClass,
+    recommendedTopPlaysMin: slateEnvironment.recommendedExposure.minHitters,
+    recommendedTopPlaysMax: slateEnvironment.recommendedExposure.maxHitters,
+    shouldConsiderSkippingSlate:
+      slateEnvironment.recommendedExposure.shouldConsiderSkip,
+    rows: finalizeRows(stabilityAdjustedRows, sortMode, limit),
   };
 }

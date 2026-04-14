@@ -16,6 +16,11 @@ import {
   TrendingUp,
   Trophy,
 } from 'lucide-react';
+import {
+  formatProbabilityPercent,
+  HR_CHANCE_INFO_TEXT,
+  HR_CHANCE_LABEL,
+} from '@/services/hrChanceDisplay';
 import { getTeamAbbreviation } from '@/services/mlbTeamMetadata';
 
 type SortMode = 'best' | 'model' | 'edge';
@@ -76,6 +81,10 @@ type DailyBoardResponse = {
   lineupMode: LineupMode;
   confirmedCount: number;
   unconfirmedCount: number;
+  predictedSlateEnvironment: 'low_hr' | 'medium_hr' | 'high_hr';
+  recommendedTopPlaysMin: number;
+  recommendedTopPlaysMax: number;
+  shouldConsiderSkippingSlate: boolean;
   rows: DailyBoardRow[];
 };
 
@@ -101,9 +110,11 @@ type BoardSnapshotSummary = {
 type SaveDefaultBoardsResponse = {
   ok: boolean;
   targetDate: string;
+  workflow?: 'all_variants' | 'morning_full_day' | 'pre_first_pitch';
   noteFileName?: string;
   notePath?: string;
   saved?: Array<{
+    label?: string;
     boardType: SortMode;
     rowsSaved: number;
   }>;
@@ -124,7 +135,7 @@ type CachedDashboardPayload = {
   };
 };
 
-const DASHBOARD_CACHE_KEY_PREFIX = 'hr-dashboard-cache-v1';
+const DASHBOARD_CACHE_KEY_PREFIX = 'hr-dashboard-cache-v2';
 
 function getPreviousDateString(value: string): string {
   const [year, month, day] = value.split('-').map(Number);
@@ -217,7 +228,7 @@ function getOddsBanner(data: DailyBoardResponse | null): {
 
   return {
     title: 'Odds unavailable',
-    detail: 'The board is still loading from the model side, but edge and best-bet pricing may be limited until odds return.',
+    detail: 'The board is still loading from the model side, but edge and value context may be limited until odds return.',
     className: 'border-amber-500/20 bg-amber-500/10 text-amber-300',
   };
 }
@@ -239,9 +250,9 @@ function getEmptyStateConfig(data: DailyBoardResponse | null, sortMode: SortMode
 
   if (sortMode === 'best' && data.odds.status === 'unavailable') {
     return {
-      title: 'No priced best bets yet',
+      title: 'No odds context yet',
       detail:
-        'The model board is still available, but the betting view needs sportsbook odds before it can rank edges and combined scores.',
+        'The model board is still available, and the best board can still rank HR likelihood. Odds just are not available yet for edge and value context.',
       actionLabel: 'Open model board view',
       actionHref: '/home-run-dashboard?sort=model',
     };
@@ -266,11 +277,6 @@ function getEmptyStateConfig(data: DailyBoardResponse | null, sortMode: SortMode
   };
 }
 
-function formatPercent(value: number | null): string {
-  if (value == null) return '--';
-  return `${(value * 100).toFixed(1)}%`;
-}
-
 function formatAmericanOdds(value: number | null): string {
   if (value == null) return '--';
   return value > 0 ? `+${value}` : `${value}`;
@@ -288,10 +294,21 @@ function formatCombinedScore(value: number | null): string {
 }
 
 function getTierClass(tier: string): string {
-  if (tier === 'elite') return 'bg-amber-400/15 text-amber-300 border-amber-400/30';
-  if (tier === 'high') return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
-  if (tier === 'medium') return 'bg-blue-500/15 text-blue-300 border-blue-500/30';
+  if (tier.startsWith('Elite')) return 'bg-amber-400/15 text-amber-300 border-amber-400/30';
+  if (tier.startsWith('Strong')) return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
+  if (tier.startsWith('Solid')) return 'bg-blue-500/15 text-blue-300 border-blue-500/30';
   return 'bg-slate-500/15 text-slate-300 border-slate-500/30';
+}
+
+function matchesTierFilter(
+  tier: string,
+  filter: 'all' | 'elite' | 'strong' | 'solid' | 'longshot'
+): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'elite') return tier.startsWith('Elite');
+  if (filter === 'strong') return tier.startsWith('Strong');
+  if (filter === 'solid') return tier.startsWith('Solid');
+  return tier.startsWith('Longshot');
 }
 
 function getProbabilityClass(value: number): string {
@@ -306,6 +323,36 @@ function getEdgeClass(value: number | null): string {
   if (value > 0.05) return 'text-emerald-300';
   if (value > 0) return 'text-blue-300';
   return 'text-slate-400';
+}
+
+function getSlateGuidanceCopy(data: DailyBoardResponse): {
+  title: string;
+  detail: string;
+  className: string;
+} {
+  const rangeText = `${data.recommendedTopPlaysMin} to ${data.recommendedTopPlaysMax} plays`;
+
+  if (data.predictedSlateEnvironment === 'high_hr') {
+    return {
+      title: 'High HR slate',
+      detail: `Reasonable to consider ${rangeText}. The board can support a wider card today.`,
+      className: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300',
+    };
+  }
+
+  if (data.predictedSlateEnvironment === 'low_hr') {
+    return {
+      title: 'Low HR slate',
+      detail: 'Possible skip slate, keep exposure very limited.',
+      className: 'border-amber-500/20 bg-amber-500/10 text-amber-300',
+    };
+  }
+
+  return {
+    title: 'Medium HR slate',
+    detail: `Tighter card, consider ${rangeText}.`,
+    className: 'border-blue-500/20 bg-blue-500/10 text-blue-300',
+  };
 }
 
 function getThrowsBadgeClass(value: 'L' | 'R' | null): string {
@@ -350,18 +397,18 @@ function buildBetPerspective(row: DailyBoardRow): string {
   const uniqueNotes = [...new Set(notes)];
 
   if (uniqueNotes.length >= 3) {
-    return `This one is easier to back because ${uniqueNotes.slice(0, 3).join(', ')}.`;
+    return `This looks like a strong HR target because ${uniqueNotes.slice(0, 3).join(', ')}.`;
   }
 
   if (uniqueNotes.length === 2) {
-    return `This looks playable because ${uniqueNotes[0]} and ${uniqueNotes[1]}.`;
+    return `This profile holds up because ${uniqueNotes[0]} and ${uniqueNotes[1]}.`;
   }
 
   if (uniqueNotes.length === 1) {
     return `There is a reasonable case here because ${uniqueNotes[0]}.`;
   }
 
-  return 'Nothing looks fluky here. The model, the spot, and the number are at least pointing in the same direction.';
+  return 'Nothing looks fluky here. The model, the spot, and the surrounding context are at least pointing in the same direction.';
 }
 
 function buildPlayerResearchHref(row: DailyBoardRow): string {
@@ -392,13 +439,14 @@ export default function BestBetsDashboardClient() {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [savingBoards, setSavingBoards] = useState(false);
+  const [savingWorkflow, setSavingWorkflow] = useState<'morning_full_day' | 'pre_first_pitch' | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [lastSavedNotePath, setLastSavedNotePath] = useState<string | null>(null);
+  const [lastSavedWorkflow, setLastSavedWorkflow] = useState<string | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>('best');
-  const [lineupMode, setLineupMode] = useState<LineupMode>('confirmed');
-  const [tierFilter, setTierFilter] = useState<'all' | 'elite' | 'high' | 'medium'>('all');
+  const [lineupMode, setLineupMode] = useState<LineupMode>('all');
+  const [tierFilter, setTierFilter] = useState<'all' | 'elite' | 'strong' | 'solid' | 'longshot'>('all');
   const [showTopOnly, setShowTopOnly] = useState(false);
   const [showGlossary, setShowGlossary] = useState(false);
   const [selectedSportsbooks, setSelectedSportsbooks] = useState<string[]>([]);
@@ -513,10 +561,10 @@ export default function BestBetsDashboardClient() {
     void fetchData({ force: true });
   }, [fetchData]);
 
-  const handleSaveOfficialBoards = useCallback(async () => {
+  const handleSaveOfficialBoards = useCallback(async (workflow: 'morning_full_day' | 'pre_first_pitch') => {
     if (!data?.targetDate) return;
 
-    setSavingBoards(true);
+    setSavingWorkflow(workflow);
     setSaveStatus('idle');
     setLastSavedNotePath(null);
 
@@ -528,7 +576,8 @@ export default function BestBetsDashboardClient() {
         },
         body: JSON.stringify({
           targetDate: data.targetDate,
-          limit: 10,
+          workflow,
+          limit: 25,
           sportsbooks: selectedSportsbooks,
         }),
       });
@@ -541,20 +590,22 @@ export default function BestBetsDashboardClient() {
 
       setLastSavedAt(new Date().toISOString());
       setLastSavedNotePath(json.notePath ?? null);
+      setLastSavedWorkflow(
+        workflow === 'morning_full_day'
+          ? 'Morning Full-Day Snapshot'
+          : 'Pre-First-Pitch Snapshot'
+      );
       setSaveStatus('saved');
     } catch {
       setSaveStatus('error');
     } finally {
-      setSavingBoards(false);
+      setSavingWorkflow(null);
     }
   }, [data?.targetDate, selectedSportsbooks]);
 
   const rows = data?.rows ?? [];
   const filteredRows = useMemo(() => {
-    const tierFiltered =
-      tierFilter === 'all'
-        ? rows
-        : rows.filter((row) => row.tier === tierFilter);
+    const tierFiltered = rows.filter((row) => matchesTierFilter(row.tier, tierFilter));
     return showTopOnly ? tierFiltered.slice(0, 5) : tierFiltered;
   }, [rows, showTopOnly, tierFilter]);
   const topModelRows = useMemo(() => comparisonBoards.model?.rows.slice(0, 5) ?? [], [comparisonBoards.model]);
@@ -578,7 +629,8 @@ export default function BestBetsDashboardClient() {
       ? filteredRows.reduce((sum, row) => sum + row.predictedProbability, 0) / filteredRows.length
       : 0;
   const positiveEdgeCount = filteredRows.filter((row) => (row.edge ?? 0) > 0).length;
-  const eliteCount = filteredRows.filter((row) => row.tier === 'elite').length;
+  const eliteCount = filteredRows.filter((row) => row.tier.startsWith('Elite')).length;
+  const slateGuidance = data ? getSlateGuidanceCopy(data) : null;
 
   const lastUpdated = data?.generatedAt
     ? new Date(data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -597,7 +649,7 @@ export default function BestBetsDashboardClient() {
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4">
         <Loader2 size={40} className="animate-spin text-brand-400" />
         <div className="text-center">
-          <p className="text-lg font-medium text-slate-200">Loading Best Bets Dashboard...</p>
+          <p className="text-lg font-medium text-slate-200">Loading HR target dashboard...</p>
           <p className="mt-1 text-sm text-slate-500">
             Pulling the current daily board and formatting it for a cleaner view
           </p>
@@ -631,12 +683,12 @@ export default function BestBetsDashboardClient() {
           <div className="max-w-2xl">
             <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-brand-500/20 bg-brand-500/10 px-3 py-1 text-xs font-medium text-brand-300">
               <Sparkles size={12} />
-              Best Bets Dashboard
+              HR Target Dashboard
             </div>
-            <h1 className="text-3xl font-bold text-slate-100">Today's HR betting board, styled for actual use</h1>
+            <h1 className="text-3xl font-bold text-slate-100">Today's HR target board, styled for actual use</h1>
             <p className="mt-2 text-sm text-slate-400">
               This dashboard uses the same backend as the daily board, with the default view focused
-              on `best` bets instead of the older projection pipeline.
+              on the best practical HR target board rather than the older projection pipeline.
             </p>
             <p className="mt-3 text-xs text-slate-500">
               {lockedAtLabel
@@ -666,13 +718,24 @@ export default function BestBetsDashboardClient() {
               <HelpCircle size={14} />
               {showGlossary ? 'Hide glossary' : 'What do these terms mean?'}
             </button>
+            <span className="text-xs text-slate-500">
+              Morning saves the curated full-day pool. Pre-first-pitch saves the confirmed-only pool.
+            </span>
             <button
-              onClick={handleSaveOfficialBoards}
-              disabled={savingBoards}
+              onClick={() => void handleSaveOfficialBoards('morning_full_day')}
+              disabled={savingWorkflow != null}
               className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {savingBoards ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-              {savingBoards ? 'Saving boards...' : 'Save Official Boards'}
+              {savingWorkflow === 'morning_full_day' ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+              {savingWorkflow === 'morning_full_day' ? 'Saving morning snapshot...' : 'Save Morning Full-Day Snapshot'}
+            </button>
+            <button
+              onClick={() => void handleSaveOfficialBoards('pre_first_pitch')}
+              disabled={savingWorkflow != null}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-500/20 bg-blue-500/10 px-3 py-2 text-sm font-medium text-blue-300 hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {savingWorkflow === 'pre_first_pitch' ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+              {savingWorkflow === 'pre_first_pitch' ? 'Saving pre-first-pitch snapshot...' : 'Save Pre-First-Pitch Snapshot'}
             </button>
             <button
               onClick={handleManualRefresh}
@@ -693,7 +756,8 @@ export default function BestBetsDashboardClient() {
           <span>Training rows: {data.trainingExampleCount}</span>
           {saveStatus === 'saved' && (
             <span className="text-emerald-300">
-              Official model + best boards saved{lastSavedNotePath ? ` and note exported to ${lastSavedNotePath}` : ''}
+              {lastSavedWorkflow ?? 'Official snapshot'} saved
+              {lastSavedNotePath ? ` and note exported to ${lastSavedNotePath}` : ''}
             </span>
           )}
           {saveStatus === 'error' && (
@@ -713,25 +777,26 @@ export default function BestBetsDashboardClient() {
               <div className="rounded-xl border border-surface-400 bg-surface-800/80 p-3">
                 <p className="text-xs uppercase tracking-wide text-brand-300">Best board</p>
                 <p className="mt-2 text-sm leading-relaxed text-slate-300">
-                  This is the betting view. It blends model strength with price, so it cares about value and not just raw likelihood.
+                  This is the practical HR target view. It is still centered on HR likelihood, with odds and edge shown as context.
                 </p>
               </div>
               <div className="rounded-xl border border-surface-400 bg-surface-800/80 p-3">
                 <p className="text-xs uppercase tracking-wide text-brand-300">Edge</p>
                 <p className="mt-2 text-sm leading-relaxed text-slate-300">
-                  Edge is the gap between the model's HR chance and the sportsbook's implied chance. Positive edge usually means the number is more playable.
+                  Edge is the gap between {HR_CHANCE_LABEL.toLowerCase()} and the sportsbook&apos;s implied chance. It is useful value context, but it is not the main ranking driver on the model or best boards.
                 </p>
+                <p className="mt-2 text-xs text-slate-500">{HR_CHANCE_INFO_TEXT}</p>
               </div>
               <div className="rounded-xl border border-surface-400 bg-surface-800/80 p-3">
                 <p className="text-xs uppercase tracking-wide text-brand-300">Combined score</p>
                 <p className="mt-2 text-sm leading-relaxed text-slate-300">
-                  This is the ranking score for the best board. It gives the model the biggest voice, then gives extra credit when the price is favorable.
+                  This is a legacy field kept for reference. It is no longer the main score used to rank the best board.
                 </p>
               </div>
               <div className="rounded-xl border border-surface-400 bg-surface-800/80 p-3">
                 <p className="text-xs uppercase tracking-wide text-brand-300">Tier</p>
                 <p className="mt-2 text-sm leading-relaxed text-slate-300">
-                  Tiers are a quick confidence grouping inside the model. Elite is the strongest cluster, then high, then medium.
+                  Tiers are grouped by home run likelihood only: Elite, Strong, Solid, then Longshot.
                 </p>
               </div>
             </div>
@@ -746,10 +811,10 @@ export default function BestBetsDashboardClient() {
               <Trophy size={18} />
             </div>
             <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500">Top Best Bet</p>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Top practical target</p>
               <p className="text-xl font-bold text-slate-100">{topRow?.batterName ?? '--'}</p>
               <p className="text-xs text-slate-400">
-                {topRow ? `${formatPercent(topRow.predictedProbability)} model | ${formatEdge(topRow.edge)} edge` : 'No row'}
+                {topRow ? `${formatProbabilityPercent(topRow.predictedProbability)} ${HR_CHANCE_LABEL} | ${formatEdge(topRow.edge)} edge` : 'No row'}
               </p>
             </div>
           </div>
@@ -761,8 +826,8 @@ export default function BestBetsDashboardClient() {
               <TrendingUp size={18} />
             </div>
             <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500">Avg HR Probability</p>
-              <p className="text-xl font-bold text-slate-100">{formatPercent(averageProbability)}</p>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Avg {HR_CHANCE_LABEL}</p>
+              <p className="text-xl font-bold text-slate-100">{formatProbabilityPercent(averageProbability)}</p>
               <p className="text-xs text-slate-400">{filteredRows.length} visible targets</p>
             </div>
           </div>
@@ -787,17 +852,40 @@ export default function BestBetsDashboardClient() {
               {lineupMode === 'confirmed' ? <CheckCircle2 size={18} /> : <Clock3 size={18} />}
             </div>
             <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500">Lineup Universe</p>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Lineup pool</p>
               <p className="text-xl font-bold text-slate-100">
                 {lineupMode === 'confirmed' ? data.confirmedCount : filteredRows.length}
               </p>
               <p className="text-xs text-slate-400">
-                {data.confirmedCount} confirmed | {data.unconfirmedCount} unconfirmed
+                {lineupMode === 'all'
+                  ? `Curated full-day pool | ${data.confirmedCount} confirmed | ${data.unconfirmedCount} projected`
+                  : `${data.confirmedCount} confirmed | posted-lineup-only view`}
               </p>
             </div>
           </div>
         </div>
       </div>
+
+      {slateGuidance && (
+        <div className={`rounded-2xl border p-4 sm:p-5 ${slateGuidance.className}`}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide">Slate guidance</p>
+              <p className="mt-1 text-lg font-semibold">{slateGuidance.title}</p>
+              <p className="mt-1 text-sm leading-relaxed text-slate-100/90">{slateGuidance.detail}</p>
+            </div>
+            <div className="rounded-xl border border-current/20 bg-black/10 px-3 py-2 text-sm">
+              <p className="text-[11px] uppercase tracking-wide text-current/80">Recommended plays</p>
+              <p className="mt-1 font-semibold">
+                {data.recommendedTopPlaysMin} to {data.recommendedTopPlaysMax}
+              </p>
+              <p className="text-[11px] text-current/80">
+                {data.shouldConsiderSkippingSlate ? 'Caution or possible skip slate' : 'Normal exposure is reasonable'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-3 md:grid-cols-3">
         <div className="rounded-xl border border-surface-400 bg-surface-800 p-4">
@@ -811,12 +899,14 @@ export default function BestBetsDashboardClient() {
         </div>
 
         <div className="rounded-xl border border-surface-400 bg-surface-800 p-4">
-          <p className="text-xs uppercase tracking-wide text-slate-500">Lineup confidence</p>
+          <p className="text-xs uppercase tracking-wide text-slate-500">Lineup mode</p>
           <p className="mt-1 text-sm font-semibold text-slate-100">
-            {data.confirmedCount} confirmed hitters
+            {lineupMode === 'all' ? 'Curated full-day pool' : 'Confirmed-only pool'}
           </p>
           <p className="mt-1 text-xs text-slate-400">
-            {data.unconfirmedCount} unconfirmed hitters remain in the broader pool
+            {lineupMode === 'all'
+              ? 'Includes strong projected hitters for later games before all lineups are posted'
+              : 'Strict posted-lineup-only view for later confirmation-based decisions'}
           </p>
         </div>
 
@@ -934,7 +1024,7 @@ export default function BestBetsDashboardClient() {
           <div>
             <h2 className="text-base font-semibold text-slate-100">Top 5 compare: model vs best</h2>
             <p className="text-xs text-slate-500">
-              A quick way to see where the pure HR model agrees with the betting-facing board.
+              A quick way to see where the pure HR model agrees with the practical HR target board.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 text-xs">
@@ -982,7 +1072,7 @@ export default function BestBetsDashboardClient() {
                     </div>
                     <div className="text-right">
                       <p className={`text-sm font-semibold ${getProbabilityClass(row.predictedProbability)}`}>
-                        {formatPercent(row.predictedProbability)}
+                        {formatProbabilityPercent(row.predictedProbability)}
                       </p>
                       <p className={`text-[11px] ${shared ? 'text-emerald-300' : 'text-blue-300'}`}>
                         {shared ? 'Also on best' : 'Model-only lean'}
@@ -998,7 +1088,7 @@ export default function BestBetsDashboardClient() {
             <div className="mb-3 flex items-center justify-between">
               <div>
                 <p className="text-xs uppercase tracking-wide text-amber-300">Best board</p>
-                <p className="text-sm text-slate-400">Model plus price-conscious ranking</p>
+                <p className="text-sm text-slate-400">Practical HR target ranking, still led by HR likelihood</p>
               </div>
               <Link
                 href="/hr-daily-board?sort=best"
@@ -1020,7 +1110,7 @@ export default function BestBetsDashboardClient() {
                         #{row.rank} {row.batterName}
                       </p>
                       <p className="text-xs text-slate-500">
-                        {formatPercent(row.predictedProbability)} model
+                        {formatProbabilityPercent(row.predictedProbability)} {HR_CHANCE_LABEL}
                         {row.edge != null ? ` | ${formatEdge(row.edge)} edge` : ''}
                       </p>
                     </div>
@@ -1029,7 +1119,7 @@ export default function BestBetsDashboardClient() {
                         {formatEdge(row.edge)}
                       </p>
                       <p className={`text-[11px] ${shared ? 'text-emerald-300' : 'text-amber-300'}`}>
-                        {shared ? 'Also on model' : 'Price-driven bump'}
+                        {shared ? 'Also on model' : 'Same hitter, different board context'}
                       </p>
                     </div>
                   </div>
@@ -1044,14 +1134,14 @@ export default function BestBetsDashboardClient() {
               <div>
                 <p className="text-lg font-semibold text-slate-100">{overlappingTopPicks.length}/5 overlap</p>
                 <p className="text-xs text-slate-400">
-                  Strong overlap usually means the baseball case and the betting number are aligned.
+                  Strong overlap usually means the pure likelihood view and the practical board are seeing the slate similarly.
                 </p>
               </div>
               <div>
                 <p className="text-sm font-medium text-blue-300">Model-only names</p>
                 <p className="mt-1 text-xs leading-relaxed text-slate-400">
                   {modelOnlyPicks.length > 0
-                    ? `${modelOnlyPicks.map((row) => row.batterName).join(', ')} look stronger as pure HR calls than as bets at the current price.`
+                    ? `${modelOnlyPicks.map((row) => row.batterName).join(', ')} rate a little better on pure HR likelihood than they do on the practical board.`
                     : 'No major disagreements from the model side right now.'}
                 </p>
               </div>
@@ -1059,7 +1149,7 @@ export default function BestBetsDashboardClient() {
                 <p className="text-sm font-medium text-amber-300">Best-only names</p>
                 <p className="mt-1 text-xs leading-relaxed text-slate-400">
                   {bestOnlyPicks.length > 0
-                    ? `${bestOnlyPicks.map((row) => row.batterName).join(', ')} are getting extra help from the market number or edge setup.`
+                    ? `${bestOnlyPicks.map((row) => row.batterName).join(', ')} are landing a bit better on the practical board once odds and edge context are layered in.`
                     : 'The best board is mostly echoing the model right now.'}
                 </p>
               </div>
@@ -1119,7 +1209,7 @@ export default function BestBetsDashboardClient() {
                   : 'border border-transparent text-slate-400 hover:bg-surface-700 hover:text-slate-100'
               }`}
             >
-              {mode === 'best' ? 'Best Bets' : mode === 'model' ? 'Model' : 'Edge'}
+              {mode === 'best' ? 'Best' : mode === 'model' ? 'Model' : 'Edge'}
             </button>
           ))}
         </div>
@@ -1127,7 +1217,7 @@ export default function BestBetsDashboardClient() {
         <div className="hidden h-4 w-px bg-surface-300 sm:block" />
 
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-          {(['confirmed', 'all'] as LineupMode[]).map((mode) => (
+          {(['all', 'confirmed'] as LineupMode[]).map((mode) => (
             <button
               key={mode}
               onClick={() => setLineupMode(mode)}
@@ -1137,7 +1227,7 @@ export default function BestBetsDashboardClient() {
                   : 'border border-transparent text-slate-400 hover:bg-surface-700 hover:text-slate-100'
               }`}
             >
-              {mode === 'confirmed' ? 'Confirmed only' : 'Include curated all'}
+              {mode === 'all' ? 'Curated full-day' : 'Confirmed only'}
             </button>
           ))}
         </div>
@@ -1145,7 +1235,7 @@ export default function BestBetsDashboardClient() {
         <div className="hidden h-4 w-px bg-surface-300 sm:block" />
 
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-          {(['all', 'elite', 'high', 'medium'] as const).map((tier) => (
+          {(['all', 'elite', 'strong', 'solid', 'longshot'] as const).map((tier) => (
             <button
               key={tier}
               onClick={() => setTierFilter(tier)}
@@ -1155,7 +1245,15 @@ export default function BestBetsDashboardClient() {
                   : 'border border-transparent text-slate-400 hover:bg-surface-700 hover:text-slate-100'
               }`}
             >
-              {tier === 'all' ? 'All tiers' : tier}
+              {tier === 'all'
+                ? 'All tiers'
+                : tier === 'elite'
+                  ? 'Elite'
+                  : tier === 'strong'
+                    ? 'Strong'
+                    : tier === 'solid'
+                      ? 'Solid'
+                      : 'Longshot'}
             </button>
           ))}
         </div>
@@ -1175,9 +1273,9 @@ export default function BestBetsDashboardClient() {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-base font-semibold text-slate-100">Featured betting cards</h2>
+            <h2 className="text-base font-semibold text-slate-100">Featured HR target cards</h2>
             <p className="text-xs text-slate-500">
-              Better-looking version of the best-bets board with the same live backend data.
+              Better-looking version of the best board with the same live backend data.
             </p>
           </div>
           <span className="text-xs text-slate-500">{filteredRows.length} cards</span>
@@ -1278,9 +1376,9 @@ export default function BestBetsDashboardClient() {
 
                   <div className="text-right">
                     <p className={`text-2xl font-bold ${getProbabilityClass(row.predictedProbability)}`}>
-                      {formatPercent(row.predictedProbability)}
+                      {formatProbabilityPercent(row.predictedProbability)}
                     </p>
-                    <p className="text-xs text-slate-500">model HR chance</p>
+                    <p className="text-xs text-slate-500">{HR_CHANCE_LABEL}</p>
                   </div>
                 </div>
 
@@ -1314,11 +1412,11 @@ export default function BestBetsDashboardClient() {
                     <p className="text-[11px] text-slate-500">vs implied</p>
                   </div>
                   <div className="rounded-xl bg-surface-700 p-3">
-                    <p className="text-[11px] uppercase tracking-wide text-slate-500">Best score</p>
+                    <p className="text-[11px] uppercase tracking-wide text-slate-500">Combined score</p>
                     <p className="mt-1 text-sm font-semibold text-slate-100">
                       {formatCombinedScore(row.combinedScore)}
                     </p>
-                    <p className="text-[11px] text-slate-500">hybrid rank</p>
+                    <p className="text-[11px] text-slate-500">legacy field</p>
                   </div>
                 </div>
 
@@ -1375,7 +1473,7 @@ export default function BestBetsDashboardClient() {
                 <div>
                   <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500">
                     <Flame size={12} />
-                    Why this bet
+                    Why this HR target
                   </div>
                   <p className="mb-3 text-sm leading-relaxed text-slate-300">
                     {buildBetPerspective(row)}
@@ -1428,9 +1526,9 @@ export default function BestBetsDashboardClient() {
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                 <div className="rounded-lg bg-surface-800 px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-wide text-slate-500">Model</p>
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500">{HR_CHANCE_LABEL}</p>
                   <p className={`font-semibold ${getProbabilityClass(row.predictedProbability)}`}>
-                    {formatPercent(row.predictedProbability)}
+                    {formatProbabilityPercent(row.predictedProbability)}
                   </p>
                 </div>
                 <div className="rounded-lg bg-surface-800 px-3 py-2">
@@ -1448,10 +1546,10 @@ export default function BestBetsDashboardClient() {
               <tr className="bg-surface-700 text-left text-xs uppercase tracking-wide text-slate-400">
                 <th className="px-4 py-3">#</th>
                 <th className="px-4 py-3">Player</th>
-                <th className="px-4 py-3">Model</th>
+                <th className="px-4 py-3" title={HR_CHANCE_INFO_TEXT}>{HR_CHANCE_LABEL}</th>
                 <th className="px-4 py-3">Odds</th>
                 <th className="px-4 py-3">Edge</th>
-                <th className="px-4 py-3">Combined</th>
+                <th className="px-4 py-3">Combined (Legacy)</th>
                 <th className="px-4 py-3">Tier</th>
                 <th className="px-4 py-3">Lineup</th>
                 <th className="px-4 py-3">Book</th>
@@ -1470,7 +1568,7 @@ export default function BestBetsDashboardClient() {
                     </div>
                   </td>
                   <td className={`px-4 py-3 font-semibold ${getProbabilityClass(row.predictedProbability)}`}>
-                    {formatPercent(row.predictedProbability)}
+                    {formatProbabilityPercent(row.predictedProbability)}
                   </td>
                   <td className="px-4 py-3 text-slate-300">{formatAmericanOdds(row.sportsbookOddsAmerican)}</td>
                   <td className={`px-4 py-3 font-medium ${getEdgeClass(row.edge)}`}>{formatEdge(row.edge)}</td>

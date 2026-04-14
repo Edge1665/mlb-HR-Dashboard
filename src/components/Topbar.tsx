@@ -1,10 +1,11 @@
-'use client';
+﻿'use client';
 import React, { useState } from 'react';
 import { Search, Bell, RefreshCw, ChevronDown } from 'lucide-react';
+import { useTodaysSlateSummary } from '@/hooks/useTodaysSlateSummary';
 
 const PAGE_TITLES: Record<string, { title: string; subtitle: string }> = {
   '/home-run-dashboard': { title: 'Home Run Dashboard', subtitle: 'Top HR probability targets for today\'s slate' },
-  '/today-s-games': { title: "Today's Games", subtitle: 'Apr 4, 2026 — 8 games on the slate' },
+  '/today-s-games': { title: "Today's Games", subtitle: '' },
   '/player-research': { title: 'Player Research', subtitle: 'Statcast metrics & matchup analysis' },
 };
 
@@ -14,7 +15,12 @@ interface TopbarProps {
 
 export default function Topbar({ currentPath }: TopbarProps) {
   const [refreshing, setRefreshing] = useState(false);
+  const { dateLabel, gamesCount } = useTodaysSlateSummary();
   const pageInfo = PAGE_TITLES[currentPath] ?? { title: 'MLBAnalytics', subtitle: '' };
+  const subtitle =
+    currentPath === '/today-s-games'
+      ? `${dateLabel} - ${gamesCount ?? '--'} games on the slate`
+      : pageInfo.subtitle;
 
   function handleRefresh() {
     setRefreshing(true);
@@ -25,7 +31,7 @@ export default function Topbar({ currentPath }: TopbarProps) {
     <header className="h-14 bg-surface-800 border-b border-surface-400 flex items-center justify-between px-4 lg:px-6 flex-shrink-0">
       <div className="flex flex-col min-w-0">
         <h1 className="text-sm font-semibold text-slate-100 truncate">{pageInfo.title}</h1>
-        <p className="text-xs text-slate-500 truncate hidden sm:block">{pageInfo.subtitle}</p>
+        <p className="text-xs text-slate-500 truncate hidden sm:block">{subtitle}</p>
       </div>
 
       <div className="flex items-center gap-2 flex-shrink-0">
@@ -37,7 +43,7 @@ export default function Topbar({ currentPath }: TopbarProps) {
             placeholder="Search player..."
             className="bg-transparent text-sm text-slate-300 placeholder-slate-600 outline-none w-full"
           />
-          <span className="text-xs text-slate-600 font-mono-stat flex-shrink-0">⌘K</span>
+          <span className="text-xs text-slate-600 font-mono-stat flex-shrink-0">Ctrl+K</span>
         </div>
 
         {/* Data freshness */}

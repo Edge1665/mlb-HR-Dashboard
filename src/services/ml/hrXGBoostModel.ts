@@ -4,7 +4,7 @@ import {
   createSlateEnvironmentBacktestContext,
 } from './hrBacktest';
 import {
-  HR_MODEL_FEATURES,
+  HR_MODEL_FEATURES_PRODUCTION_DEFAULT,
   featureVectorFromExample,
   type HRModelFeatureName,
 } from './hrFeatureEngineering';
@@ -42,6 +42,7 @@ export interface XGBoostModelSummary {
     positiveBoostFactor: number;
     negativeSampleRate: number;
     probabilityPower: number;
+    conservativeShrinkage: number;
     seasonSampleWeights: SeasonSampleWeights;
   };
   featureImportance: Record<string, number>;
@@ -111,6 +112,10 @@ function applyStandardization(row: number[], means: number[], stds: number[]): n
 }
 
 export type HRProbabilityMode = 'raw_calibrated' | 'conservative';
+
+const DEFAULT_CONSERVATIVE_SHRINKAGE = 0.25;
+export const DEFAULT_PRODUCTION_HR_XGBOOST_FEATURE_SET =
+  HR_MODEL_FEATURES_PRODUCTION_DEFAULT;
 
 function buildSampleWeights(
   examples: HRTrainingExample[],
@@ -303,10 +308,14 @@ function applyCalibration(rawPrediction: number, calibration: CalibrationModel):
 
 function getConservativeProbability(
   calibratedPrediction: number,
-  calibration: CalibrationModel
+  calibration: CalibrationModel,
+  conservativeShrinkage = DEFAULT_CONSERVATIVE_SHRINKAGE
 ): number {
   const globalRate = clampProbability(calibration.globalPositiveRate || 0.1);
-  return clampProbability(globalRate + (calibratedPrediction - globalRate) * 0.45);
+  const shrinkage = Math.max(0, Math.min(0.95, conservativeShrinkage));
+  return clampProbability(
+    globalRate + (calibratedPrediction - globalRate) * (1 - shrinkage)
+  );
 }
 
 export function predictHRXGBoostProbabilityDetails(
@@ -318,7 +327,8 @@ export function predictHRXGBoostProbabilityDetails(
   },
   calibration: CalibrationModel,
   probabilityPower = 0.85,
-  featureNames: readonly HRModelFeatureName[] = HR_MODEL_FEATURES
+  conservativeShrinkage = DEFAULT_CONSERVATIVE_SHRINKAGE,
+  featureNames: readonly HRModelFeatureName[] = DEFAULT_PRODUCTION_HR_XGBOOST_FEATURE_SET
 ): {
   rawCalibratedProbability: number;
   conservativeProbability: number;
@@ -335,7 +345,8 @@ export function predictHRXGBoostProbabilityDetails(
   const calibratedPrediction = applyCalibration(rankedPrediction, calibration);
   const conservativeProbability = getConservativeProbability(
     calibratedPrediction,
-    calibration
+    calibration,
+    conservativeShrinkage
   );
 
   return {
@@ -355,6 +366,7 @@ export async function trainHRXGBoostModel(
     positiveBoostFactor?: number;
     negativeSampleRate?: number;
     probabilityPower?: number;
+    conservativeShrinkage?: number;
     featureNames?: readonly HRModelFeatureName[];
     seasonSampleWeights?: SeasonSampleWeights;
     testExamples?: HRTrainingExample[];
@@ -380,9 +392,12 @@ export async function trainHRXGBoostModel(
     positiveBoostFactor: options?.positiveBoostFactor ?? 6,
     negativeSampleRate: options?.negativeSampleRate ?? 1.0,
     probabilityPower: options?.probabilityPower ?? 0.85,
+    conservativeShrinkage:
+      options?.conservativeShrinkage ?? DEFAULT_CONSERVATIVE_SHRINKAGE,
     seasonSampleWeights: normalizeSeasonSampleWeights(options?.seasonSampleWeights),
   };
-  const featureNames = options?.featureNames ?? HR_MODEL_FEATURES;
+  const featureNames =
+    options?.featureNames ?? DEFAULT_PRODUCTION_HR_XGBOOST_FEATURE_SET;
 
   const sampleWeight = buildSampleWeights(
     trainingExamples,
@@ -461,7 +476,8 @@ export function predictHRXGBoostProbability(
   },
   calibration: CalibrationModel,
   probabilityPower = 0.85,
-  featureNames: readonly HRModelFeatureName[] = HR_MODEL_FEATURES,
+  conservativeShrinkage = DEFAULT_CONSERVATIVE_SHRINKAGE,
+  featureNames: readonly HRModelFeatureName[] = DEFAULT_PRODUCTION_HR_XGBOOST_FEATURE_SET,
   probabilityMode: HRProbabilityMode = 'raw_calibrated'
 ): number {
   const details = predictHRXGBoostProbabilityDetails(
@@ -470,6 +486,7 @@ export function predictHRXGBoostProbability(
     standardization,
     calibration,
     probabilityPower,
+    conservativeShrinkage,
     featureNames
   );
 
@@ -490,6 +507,7 @@ export async function runTimeSplitBacktestXGBoost(
     positiveBoostFactor?: number;
     negativeSampleRate?: number;
     probabilityPower?: number;
+    conservativeShrinkage?: number;
     featureNames?: readonly HRModelFeatureName[];
     seasonSampleWeights?: SeasonSampleWeights;
     probabilityMode?: HRProbabilityMode;
@@ -518,8 +536,11 @@ export async function runTimeSplitBacktestXGBoost(
   });
 
   const probabilityPower = options?.probabilityPower ?? 0.85;
+  const conservativeShrinkage =
+    options?.conservativeShrinkage ?? DEFAULT_CONSERVATIVE_SHRINKAGE;
   const probabilityMode = options?.probabilityMode ?? 'raw_calibrated';
-  const featureNames = options?.featureNames ?? HR_MODEL_FEATURES;
+  const featureNames =
+    options?.featureNames ?? DEFAULT_PRODUCTION_HR_XGBOOST_FEATURE_SET;
 
   const { model, summary, standardization, calibration } = await trainHRXGBoostModel(
     trainExamples,
@@ -531,6 +552,7 @@ export async function runTimeSplitBacktestXGBoost(
       positiveBoostFactor: options?.positiveBoostFactor,
       negativeSampleRate: options?.negativeSampleRate,
       probabilityPower,
+      conservativeShrinkage,
       calibrationExamples,
       featureNames,
       seasonSampleWeights: options?.seasonSampleWeights,
@@ -549,6 +571,7 @@ export async function runTimeSplitBacktestXGBoost(
         standardization,
         calibration,
         probabilityPower,
+        conservativeShrinkage,
         featureNames,
         probabilityMode
       ),

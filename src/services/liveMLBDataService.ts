@@ -43,9 +43,14 @@ function toGameWeather(
       windSpeed: 0,
       windDirection: 'N',
       windToward: 'neutral',
+      windOutToCenter: 0,
+      windInFromCenter: 0,
+      crosswind: 0,
       precipitation: 0,
       humidity: 50,
       visibility: 10,
+      densityAltitude: 0,
+      airDensityProxy: 1,
       hrImpact: 'neutral',
       hrImpactScore: 0,
     };
@@ -82,9 +87,14 @@ function toGameWeather(
     windSpeed: weather.windSpeed,
     windDirection: mappedDirection,
     windToward: mappedToward,
+    windOutToCenter: weather.windOutToCenter,
+    windInFromCenter: weather.windInFromCenter,
+    crosswind: weather.crosswind,
     precipitation: weather.precipitation,
     humidity: weather.humidity,
     visibility: weather.visibility,
+    densityAltitude: weather.densityAltitude,
+    airDensityProxy: weather.airDensityProxy,
     hrImpact: mappedImpact,
     hrImpactScore: weather.hrImpactScore,
   };
@@ -144,6 +154,52 @@ const PARK_FACTORS: Record<number, { hrFactor: number; elevation: number; name: 
 
 function getParkData(venueId: number, venueName: string): { hrFactor: number; elevation: number; name: string } {
   return PARK_FACTORS[venueId] ?? { hrFactor: 1.0, elevation: 20, name: venueName };
+}
+
+function getDefaultParkDimensions(venueId: number) {
+  const defaults: Record<number, { leftField: number; centerField: number; rightField: number }> = {
+    19: { leftField: 347, centerField: 415, rightField: 350 },
+    27: { leftField: 339, centerField: 399, rightField: 309 },
+    31: { leftField: 329, centerField: 401, rightField: 330 },
+    36: { leftField: 318, centerField: 408, rightField: 314 },
+  };
+
+  return defaults[venueId] ?? { leftField: 330, centerField: 400, rightField: 325 };
+}
+
+function buildDimensionContext(
+  dimensions: { leftField: number; centerField: number; rightField: number },
+  hrFactor: number,
+  elevation: number
+) {
+  const averageFenceDistance =
+    (dimensions.leftField + dimensions.centerField + dimensions.rightField) / 3;
+  const fenceDistanceIndex = Number(((averageFenceDistance - 350) / 50).toFixed(3));
+  const estimatedHrFriendlyCarry = Number(
+    (hrFactor * 0.7 + (elevation / 5280) * 0.3 - fenceDistanceIndex * 0.35).toFixed(3)
+  );
+  const estimatedHrParksForTypical400FtFly = Math.max(
+    1,
+    Math.min(30, Math.round(15 + estimatedHrFriendlyCarry * 8))
+  );
+
+  return {
+    dimensionContext: {
+      leftFieldLine: dimensions.leftField,
+      leftCenterGap: Math.round((dimensions.leftField + dimensions.centerField) / 2),
+      centerField: dimensions.centerField,
+      rightCenterGap: Math.round((dimensions.rightField + dimensions.centerField) / 2),
+      rightFieldLine: dimensions.rightField,
+      averageFenceDistance: Number(averageFenceDistance.toFixed(1)),
+      fenceDistanceIndex,
+      estimatedHrFriendlyCarry,
+    },
+    parkComps: {
+      estimatedHrParksForTypical400FtFly,
+      source: 'static-dimensions-placeholder',
+      isPlaceholder: true,
+    },
+  };
 }
 
 // ─── MLB team color lookup by team ID ────────────────────────────────────────
@@ -678,15 +734,20 @@ export async function fetchLiveMLBData(targetDate?: string): Promise<LiveMLBData
     const parkId = String(g.venueId);
     if (!ballparks[parkId]) {
       const park = getParkData(g.venueId, g.venueName);
+      const dimensions = getDefaultParkDimensions(g.venueId);
+      const dimensionBundle = buildDimensionContext(dimensions, park.hrFactor, park.elevation);
       ballparks[parkId] = {
         id: parkId,
         name: park.name,
         city: g.venueName,
         teamId: homeId,
         hrFactor: park.hrFactor,
+        hrFactorVsLeft: park.hrFactor,
+        hrFactorVsRight: park.hrFactor,
         hrFactorTier: park.hrFactor >= 1.1 ? 'hitter' : park.hrFactor <= 0.92 ? 'pitcher' : 'neutral',
         elevation: park.elevation,
-        dimensions: { leftField: 330, centerField: 400, rightField: 325 },
+        dimensions,
+        ...dimensionBundle,
       };
     }
   }
@@ -734,6 +795,11 @@ export async function fetchLiveMLBData(targetDate?: string): Promise<LiveMLBData
             hr9: stats?.hr9 ?? 1.2,
           },
           last7: { era: stats?.era ?? 4.50, hr9: stats?.hr9 ?? 1.2 },
+          pitchMix: {},
+          handednessHrAllowed: {
+            source: 'pitch-mix-data-not-yet-sourced',
+            isPlaceholder: true,
+          },
         };
       })()
     );
@@ -963,6 +1029,7 @@ export async function fetchLiveMLBData(targetDate?: string): Promise<LiveMLBData
           last14: { avg: 0, hr: recentForm.last14HR, ops: recentForm.last14OPS },
           last30: { avg: 0, hr: recentForm.last30HR, ops: recentForm.last30OPS },
           recentGameLog: [],
+          pitchTypeSkill: {},
         };
       })
     );

@@ -18,6 +18,7 @@ export interface BatterPowerProfile {
   flyBallRate?: number;
   hrFbRate?: number;
   xSlugging?: number;
+  pullRate?: number;
 }
 
 export interface BatterRecentForm {
@@ -37,6 +38,7 @@ export interface PlatoonSplits {
   paVsRight?: number;
   slgVsLeft?: number;
   slgVsRight?: number;
+  handednessInteraction?: number;
 }
 
 export interface PitcherProfile {
@@ -46,20 +48,43 @@ export interface PitcherProfile {
   fbPct?: number;
   era?: number;
   recentHr9?: number;
+  pitchMix?: Partial<Record<'FF' | 'SI' | 'FC' | 'SL' | 'CU' | 'CH' | 'FS' | 'KC', number>>;
+  hr9AllowedVsLeft?: number;
+  hr9AllowedVsRight?: number;
 }
 
 export interface BallparkContext {
+  id?: string;
   hrFactor?: number;
+  hrFactorVsLeft?: number;
+  hrFactorVsRight?: number;
   elevation?: number;
   name?: string;
+  dimensions?: { leftField: number; centerField: number; rightField: number };
+  averageFenceDistance?: number;
+  fenceDistanceIndex?: number;
+  estimatedHrParksForTypical400FtFly?: number;
 }
 
 export interface WeatherContext {
   temp?: number;
+  feelsLike?: number;
+  humidity?: number;
   windSpeed?: number;
+  windDirection?: 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW';
   windToward?: 'out' | 'in' | 'crosswind' | 'neutral';
+  windOutToCenter?: number;
+  windInFromCenter?: number;
+  crosswind?: number;
+  densityAltitude?: number;
+  airDensityProxy?: number;
   hrImpact?: 'positive' | 'neutral' | 'negative';
   hrImpactScore?: number;
+}
+
+export interface PitchTypeMatchupContext {
+  batterPitchTypeSkill?: Partial<Record<'FF' | 'SI' | 'FC' | 'SL' | 'CU' | 'CH' | 'FS' | 'KC', number>>;
+  pitcherPitchMix?: Partial<Record<'FF' | 'SI' | 'FC' | 'SL' | 'CU' | 'CH' | 'FS' | 'KC', number>>;
 }
 
 export interface TeamOffensiveContext {
@@ -79,6 +104,7 @@ export interface HRPredictionInput {
   ballpark?: BallparkContext;
   weather?: WeatherContext;
   teamOffense?: TeamOffensiveContext;
+  pitchTypeMatchup?: PitchTypeMatchupContext;
 }
 
 // ─── Output Interface ─────────────────────────────────────────────────────────
@@ -646,6 +672,14 @@ export function buildPredictionInput(
     paVsRight: batter?.splits?.vsRight?.pa,
     slgVsLeft: batter?.splits?.vsLeft?.slg,
     slgVsRight: batter?.splits?.vsRight?.slg,
+    handednessInteraction:
+      batter?.bats && pitcherThrows
+        ? batter.bats === 'S'
+          ? 1
+          : batter.bats !== pitcherThrows
+            ? 1
+            : -1
+        : 0,
   };
 
   // IMPORTANT:
@@ -674,6 +708,10 @@ export function buildPredictionInput(
       flyBallRate: batter?.statcast?.flyBallRate,
       hrFbRate: batter?.statcast?.hrFbRate,
       xSlugging: batter?.statcast?.xSlugging,
+      pullRate:
+        batter?.statcast?.pullRate != null && batter.statcast.pullRate > 0
+          ? batter.statcast.pullRate
+          : undefined,
     },
     recentForm: {
       last7HR: batter?.last7?.hr,
@@ -691,25 +729,48 @@ export function buildPredictionInput(
           fbPct: pitcher.fbPct,
           era: pitcher.era,
           recentHr9: pitcher.last7?.hr9,
+          pitchMix: pitcher.pitchMix,
+          hr9AllowedVsLeft: pitcher.handednessHrAllowed?.vsLeftHr9,
+          hr9AllowedVsRight: pitcher.handednessHrAllowed?.vsRightHr9,
         }
       : undefined,
     ballpark: ballpark
       ? {
+          id: ballpark.id,
           hrFactor: ballpark.hrFactor,
+          hrFactorVsLeft: ballpark.hrFactorVsLeft,
+          hrFactorVsRight: ballpark.hrFactorVsRight,
           elevation: ballpark.elevation,
           name: ballpark.name,
+          dimensions: ballpark.dimensions,
+          averageFenceDistance: ballpark.dimensionContext?.averageFenceDistance,
+          fenceDistanceIndex: ballpark.dimensionContext?.fenceDistanceIndex,
+          estimatedHrParksForTypical400FtFly:
+            ballpark.parkComps?.estimatedHrParksForTypical400FtFly,
         }
       : undefined,
     weather: game?.weather
       ? {
           temp: game.weather.temp,
+          feelsLike: game.weather.feelsLike,
+          humidity: game.weather.humidity,
           windSpeed: game.weather.windSpeed,
+          windDirection: game.weather.windDirection,
           windToward: game.weather.windToward,
+          windOutToCenter: game.weather.windOutToCenter,
+          windInFromCenter: game.weather.windInFromCenter,
+          crosswind: game.weather.crosswind,
+          densityAltitude: game.weather.densityAltitude,
+          airDensityProxy: game.weather.airDensityProxy,
           hrImpact: game.weather.hrImpact,
           hrImpactScore: game.weather.hrImpactScore,
         }
       : undefined,
     teamOffense,
+    pitchTypeMatchup: {
+      batterPitchTypeSkill: batter?.pitchTypeSkill,
+      pitcherPitchMix: pitcher?.pitchMix,
+    },
   };
 }
 

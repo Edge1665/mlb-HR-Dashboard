@@ -3,6 +3,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Loader2, RefreshCw } from 'lucide-react';
+import {
+  formatProbabilityPercent,
+  HR_CHANCE_INFO_TEXT,
+  HR_CHANCE_LABEL,
+} from '@/services/hrChanceDisplay';
 import { getTeamAbbreviation } from '@/services/mlbTeamMetadata';
 
 type SortMode = 'best' | 'model' | 'edge';
@@ -38,6 +43,10 @@ type DailyBoardResponse = {
   lineupMode: LineupMode;
   confirmedCount: number;
   unconfirmedCount: number;
+  predictedSlateEnvironment: 'low_hr' | 'medium_hr' | 'high_hr';
+  recommendedTopPlaysMin: number;
+  recommendedTopPlaysMax: number;
+  shouldConsiderSkippingSlate: boolean;
   rows: DailyBoardRow[];
 };
 
@@ -49,16 +58,11 @@ type CachedBoardPayload = {
   data: DailyBoardResponse;
 };
 
-const RAW_BOARD_CACHE_KEY_PREFIX = 'hr-raw-board-cache-v1';
+const RAW_BOARD_CACHE_KEY_PREFIX = 'hr-raw-board-cache-v2';
 
 function formatAmericanOdds(odds: number | null) {
   if (odds == null) return '--';
   return odds > 0 ? `+${odds}` : `${odds}`;
-}
-
-function formatPercent(value: number | null) {
-  if (value == null) return '--';
-  return `${(value * 100).toFixed(1)}%`;
 }
 
 function formatEdge(edge: number | null) {
@@ -70,6 +74,30 @@ function formatEdge(edge: number | null) {
 function formatCombinedScore(score: number | null) {
   if (score == null) return '--';
   return score.toFixed(3);
+}
+
+function getSlateGuidanceCopy(data: DailyBoardResponse): string {
+  if (data.predictedSlateEnvironment === 'high_hr') {
+    return `High HR slate: reasonable to consider ${data.recommendedTopPlaysMin} to ${data.recommendedTopPlaysMax} plays.`;
+  }
+
+  if (data.predictedSlateEnvironment === 'low_hr') {
+    return 'Low HR slate: possible skip slate, keep exposure very limited.';
+  }
+
+  return `Medium HR slate: tighter card, consider ${data.recommendedTopPlaysMin} to ${data.recommendedTopPlaysMax} plays.`;
+}
+
+function getSlateGuidanceClass(environment: DailyBoardResponse['predictedSlateEnvironment']): string {
+  if (environment === 'high_hr') {
+    return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200';
+  }
+
+  if (environment === 'low_hr') {
+    return 'border-amber-500/30 bg-amber-500/10 text-amber-200';
+  }
+
+  return 'border-blue-500/30 bg-blue-500/10 text-blue-200';
 }
 
 function getTodayEtDateString(): string {
@@ -294,6 +322,23 @@ export default function HRDailyBoardClient() {
         </div>
       </div>
 
+      <div className={`rounded-xl border px-4 py-3 ${getSlateGuidanceClass(data.predictedSlateEnvironment)}`}>
+        <p className="text-xs uppercase tracking-wide opacity-80">Slate guidance</p>
+        <p className="mt-1 text-lg font-semibold">
+          {data.predictedSlateEnvironment === 'high_hr'
+            ? 'High HR slate'
+            : data.predictedSlateEnvironment === 'low_hr'
+              ? 'Low HR slate'
+              : 'Medium HR slate'}
+        </p>
+        <p className="mt-1 text-sm">{getSlateGuidanceCopy(data)}</p>
+        <p className="mt-1 text-xs opacity-80">
+          Recommended plays: {data.recommendedTopPlaysMin} to {data.recommendedTopPlaysMax}
+          {data.shouldConsiderSkippingSlate ? ' | Caution or possible skip slate' : ''}
+        </p>
+        <p className="mt-2 text-xs opacity-80">{HR_CHANCE_INFO_TEXT}</p>
+      </div>
+
       <div className="overflow-x-auto">
         <table className="w-full border-collapse border text-sm">
           <thead>
@@ -303,7 +348,7 @@ export default function HRDailyBoardClient() {
               <th className="border p-2 text-left">Team</th>
               <th className="border p-2 text-left">Player</th>
               <th className="border p-2 text-left">Lineup</th>
-              <th className="border p-2 text-left">Model</th>
+              <th className="border p-2 text-left" title={HR_CHANCE_INFO_TEXT}>{HR_CHANCE_LABEL}</th>
               <th className="border p-2 text-left">Odds</th>
               <th className="border p-2 text-left">Implied</th>
               <th className="border p-2 text-left">Edge</th>
@@ -320,9 +365,9 @@ export default function HRDailyBoardClient() {
                 <td className="border p-2">{getTeamAbbreviation(row.teamId)}</td>
                 <td className="border p-2 font-medium">{row.batterName}</td>
                 <td className="border p-2">{row.lineupConfirmed ? 'Confirmed' : 'Projected'}</td>
-                <td className="border p-2">{formatPercent(row.predictedProbability)}</td>
+                <td className="border p-2">{formatProbabilityPercent(row.predictedProbability)}</td>
                 <td className="border p-2">{formatAmericanOdds(row.sportsbookOddsAmerican)}</td>
-                <td className="border p-2">{formatPercent(row.impliedProbability)}</td>
+                <td className="border p-2">{formatProbabilityPercent(row.impliedProbability)}</td>
                 <td className="border p-2">{formatEdge(row.edge)}</td>
                 <td className="border p-2">{formatCombinedScore(row.combinedScore)}</td>
                 <td className="border p-2">{row.tier}</td>

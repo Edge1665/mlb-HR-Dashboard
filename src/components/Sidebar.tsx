@@ -1,16 +1,15 @@
-'use client';
+﻿'use client';
 import React, { useState } from 'react';
 import Link from 'next/link';
 import AppLogo from './ui/AppLogo';
-import { LayoutDashboard, CalendarDays, Search, ChevronLeft, ChevronRight, Target, Settings, Bell, BarChart2, History } from 'lucide-react';
-import Icon from '@/components/ui/AppIcon';
+import { LayoutDashboard, CalendarDays, Search, ChevronLeft, ChevronRight, Target, Settings, Bell, History } from 'lucide-react';
+import { useTodaysSlateSummary } from '@/hooks/useTodaysSlateSummary';
 
 
 const NAV_ITEMS = [
   { label: 'HR Dashboard', href: '/home-run-dashboard', icon: LayoutDashboard, badge: null, description: 'Top HR targets today' },
-  { label: "Today\'s Games", href: '/today-s-games', icon: CalendarDays, badge: '8', description: 'Live game context' },
+  { label: "Today\'s Games", href: '/today-s-games', icon: CalendarDays, badge: null, description: 'Live game context' },
   { label: 'Player Research', href: '/player-research', icon: Search, badge: null, description: 'Deep batter analysis' },
-  { label: 'Team Trends', href: '/team-trends', icon: BarChart2, badge: null, description: 'Team offensive trends' },
   { label: 'HR History', href: '/hr-history', icon: History, badge: null, description: 'Previous picks & outcomes' },
 ];
 
@@ -20,6 +19,7 @@ interface SidebarProps {
 
 export default function Sidebar({ currentPath }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
+  const { dateLabel: liveDateLabel, gamesCount } = useTodaysSlateSummary();
 
   return (
     <>
@@ -47,7 +47,7 @@ export default function Sidebar({ currentPath }: SidebarProps) {
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
               </span>
-              <span>Live — Apr 4, 2026</span>
+              <span>{`Live - ${liveDateLabel}`}</span>
             </div>
           </div>
         )}
@@ -60,6 +60,7 @@ export default function Sidebar({ currentPath }: SidebarProps) {
           {NAV_ITEMS.map((item) => {
             const isActive = currentPath === item.href || currentPath.startsWith(item.href + '/');
             const Icon = item.icon;
+            const badge = item.href === '/today-s-games' && gamesCount != null ? String(gamesCount) : item.badge;
             return (
               <Link key={`nav-${item.href}`} href={item.href} title={collapsed ? item.label : undefined}>
                 <div className={`flex items-center rounded-lg transition-all duration-150 cursor-pointer group ${collapsed ? 'justify-center p-2.5' : 'gap-3 px-3 py-2.5'} ${isActive ? 'bg-brand-500/10 text-brand-400 border border-brand-500/20' : 'text-slate-400 hover:text-slate-100 hover:bg-surface-500'}`}>
@@ -68,9 +69,9 @@ export default function Sidebar({ currentPath }: SidebarProps) {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between">
                         <span className="text-sm font-medium">{item.label}</span>
-                        {item.badge && (
+                        {badge && (
                           <span className="text-xs font-mono-stat bg-brand-500/20 text-brand-400 px-1.5 py-0.5 rounded-md">
-                            {item.badge}
+                            {badge}
                           </span>
                         )}
                       </div>
@@ -145,3 +146,5 @@ export default function Sidebar({ currentPath }: SidebarProps) {
     </>
   );
 }
+
+

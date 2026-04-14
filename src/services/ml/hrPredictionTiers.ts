@@ -1,7 +1,6 @@
 export function getHRProbabilityTier(probability: number): string {
-  if (probability >= 0.28) return 'Elite HR Target';
-  if (probability >= 0.22) return 'Strong HR Target';
-  if (probability >= 0.16) return 'Decent Upside';
-  if (probability >= 0.10) return 'Longshot';
-  return 'Low';
+  if (probability >= 0.24) return 'Elite HR Targets';
+  if (probability >= 0.18) return 'Strong HR Targets';
+  if (probability >= 0.12) return 'Solid HR Targets';
+  return 'Longshot HR Targets';
 }

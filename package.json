@@ -48,6 +48,7 @@
     "serve": "next start",
     "type-check": "tsc --noEmit",
     "hr:backtest:xgboost": "node --experimental-strip-types --import ./scripts/register-ts-paths.mjs ./scripts/run-xgboost-backtest.ts",
+    "hr:backtest:xgboost-experiments": "node --experimental-strip-types --import ./scripts/register-ts-paths.mjs ./scripts/run-xgboost-experiments.ts",
     "hr:backtest:snapshot-odds": "node --experimental-strip-types --import ./scripts/register-ts-paths.mjs ./scripts/run-snapshot-odds-backtest.ts",
     "hr:daily-refresh": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/hr-daily-refresh.ps1",
     "hr:save-official-board": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/hr-save-official-board.ps1",

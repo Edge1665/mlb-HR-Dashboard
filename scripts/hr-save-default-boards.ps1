@@ -2,7 +2,7 @@ param(
   [string]$BaseUrl = "http://localhost:4028",
   [string]$TargetDate = "",
   [string]$TrainingStartDate = "",
-  [int]$Limit = 10
+  [int]$Limit = 25
 )
 
 if ($TargetDate -eq "") {

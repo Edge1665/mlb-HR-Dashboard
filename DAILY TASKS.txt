@@ -1,0 +1,25 @@
+START APP:
+
+npm run dev
+
+RUN FULL REFRESH:
+npm run hr:daily-refresh
+
+
+THEN NAVIGATE TO:
+http://localhost:4028/hr-daily-board
+http://localhost:4028/hr-daily-board?sort=best
+
+
+
+Near first pitch (Save Model boars snapshot)
+
+npm run hr:save-official-board
+
+TO SAVE BEST: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/hr-save-official-board.ps1 -BoardType best
+
+TO VIEW HR RESULTS - Change date to yesterday's date.
+http://localhost:4028/api/hr-board-snapshots?date=2026-04-07
+
+
+View hisotrey here: http://localhost:4028/hr-history

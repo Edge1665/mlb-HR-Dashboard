@@ -6,6 +6,7 @@ export interface SnapshotOddsBacktestRow {
   snapshotDate: string;
   boardType: DailyBoardSortMode;
   lineupMode: DailyBoardLineupMode;
+  snapshotKind: string;
   rank: number;
   batterId: string;
   batterName: string;
@@ -174,8 +175,15 @@ export async function fetchSavedSnapshotOddsRows(): Promise<SnapshotOddsBacktest
   const supabase = getSupabase();
   const snapshotsQuery = await supabase
     .from('hr_board_snapshots')
-    .select('id, snapshot_date, board_type, lineup_mode')
-    .eq('snapshot_kind', 'official');
+    .select('id, snapshot_date, board_type, lineup_mode, snapshot_kind')
+    .eq('is_deleted', false)
+    .in('snapshot_kind', [
+      'official',
+      'official_early_full_day',
+      'official_lock_time',
+      'morning_full_day',
+      'pre_first_pitch',
+    ]);
 
   if (snapshotsQuery.error) {
     throw new Error(snapshotsQuery.error.message);
@@ -193,6 +201,7 @@ export async function fetchSavedSnapshotOddsRows(): Promise<SnapshotOddsBacktest
         snapshotDate: String(row.snapshot_date),
         boardType: row.board_type as DailyBoardSortMode,
         lineupMode: row.lineup_mode as DailyBoardLineupMode,
+        snapshotKind: String(row.snapshot_kind),
       },
     ])
   );
@@ -224,6 +233,7 @@ export async function fetchSavedSnapshotOddsRows(): Promise<SnapshotOddsBacktest
         snapshotDate: meta.snapshotDate,
         boardType: meta.boardType,
         lineupMode: meta.lineupMode,
+        snapshotKind: meta.snapshotKind,
         rank: Number(row.rank),
         batterId: String(row.batter_id),
         batterName: String(row.batter_name),

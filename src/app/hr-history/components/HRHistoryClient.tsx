@@ -1,4 +1,4 @@
-'use client';
+ï»¿'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
 import {
@@ -11,6 +11,12 @@ import {
   Target,
   Trophy,
 } from 'lucide-react';
+import {
+  formatProbabilityPercent,
+  HR_CHANCE_INFO_TEXT,
+  HR_CHANCE_LABEL,
+} from '@/services/hrChanceDisplay';
+import { getTeamAbbreviation } from '@/services/mlbTeamMetadata';
 
 type BoardType = 'model' | 'best' | 'edge';
 type LineupMode = 'confirmed' | 'all';
@@ -75,8 +81,8 @@ function formatCapturedAt(value: string): string {
   });
 }
 
-function formatPercent(value: number | null): string {
-  if (value == null) return '—';
+function formatEdgePercent(value: number | null): string {
+  if (value == null) return 'â€”';
   return `${(value * 100).toFixed(1)}%`;
 }
 
@@ -88,6 +94,30 @@ function formatBoardLabel(boardType: BoardType): string {
 
 function formatLineupLabel(lineupMode: LineupMode): string {
   return lineupMode === 'confirmed' ? 'Confirmed' : 'All';
+}
+
+function formatSnapshotKindLabel(snapshotKind: string): string {
+  if (snapshotKind === 'morning_full_day' || snapshotKind === 'official_early_full_day') {
+    return 'Morning Full-Day';
+  }
+
+  if (snapshotKind === 'pre_first_pitch' || snapshotKind === 'official_lock_time') {
+    return 'Pre-First-Pitch';
+  }
+
+  return 'Official';
+}
+
+function getSnapshotKindSortWeight(snapshotKind: string): number {
+  if (snapshotKind === 'morning_full_day' || snapshotKind === 'official_early_full_day') {
+    return 0;
+  }
+
+  if (snapshotKind === 'pre_first_pitch' || snapshotKind === 'official_lock_time') {
+    return 1;
+  }
+
+  return 2;
 }
 
 function getTierClass(tier: string): string {
@@ -149,6 +179,11 @@ export default function HRHistoryClient() {
         const boardWeightDiff =
           getBoardSortWeight(a.boardType) - getBoardSortWeight(b.boardType);
         if (boardWeightDiff !== 0) return boardWeightDiff;
+
+        const snapshotKindDiff =
+          getSnapshotKindSortWeight(a.snapshotKind) -
+          getSnapshotKindSortWeight(b.snapshotKind);
+        if (snapshotKindDiff !== 0) return snapshotKindDiff;
 
         return new Date(b.capturedAt).getTime() - new Date(a.capturedAt).getTime();
       });
@@ -339,7 +374,7 @@ export default function HRHistoryClient() {
                           {formatBoardLabel(snapshot.boardType)} Board
                         </p>
                         <p className="text-xs text-slate-400">
-                          {formatLineupLabel(snapshot.lineupMode)} • {formatCapturedAt(snapshot.capturedAt)}
+                          {formatSnapshotKindLabel(snapshot.snapshotKind)} â€¢ {formatLineupLabel(snapshot.lineupMode)} â€¢ {formatCapturedAt(snapshot.capturedAt)}
                         </p>
                       </div>
                       <span className="rounded-md border border-surface-400 px-2 py-1 text-xs text-slate-300">
@@ -378,11 +413,12 @@ export default function HRHistoryClient() {
                 <>
                   <div className="border-b border-surface-400 px-5 py-4">
                     <h2 className="text-lg font-semibold text-slate-100">
-                      {formatBoardLabel(snapshotDetail.snapshot.boardType)} Board • {formatDate(snapshotDetail.snapshot.snapshotDate)}
+                      {formatBoardLabel(snapshotDetail.snapshot.boardType)} Board â€¢ {formatDate(snapshotDetail.snapshot.snapshotDate)}
                     </h2>
                     <p className="mt-1 text-sm text-slate-400">
-                      Captured {formatCapturedAt(snapshotDetail.snapshot.capturedAt)} • {formatLineupLabel(snapshotDetail.snapshot.lineupMode)} • Trained on {snapshotDetail.snapshot.trainingExampleCount ?? '—'} examples
+                      Captured {formatCapturedAt(snapshotDetail.snapshot.capturedAt)} â€¢ {formatSnapshotKindLabel(snapshotDetail.snapshot.snapshotKind)} â€¢ {formatLineupLabel(snapshotDetail.snapshot.lineupMode)} â€¢ Trained on {snapshotDetail.snapshot.trainingExampleCount ?? 'â€”'} examples
                     </p>
+                    <p className="mt-2 text-xs text-slate-500">{HR_CHANCE_INFO_TEXT}</p>
                   </div>
 
                   <div className="overflow-x-auto">
@@ -391,7 +427,7 @@ export default function HRHistoryClient() {
                         <tr className="border-b border-surface-400 bg-surface-700 text-left text-xs uppercase tracking-wide text-slate-400">
                           <th className="px-4 py-3">#</th>
                           <th className="px-4 py-3">Player</th>
-                          <th className="px-4 py-3">Model</th>
+                          <th className="px-4 py-3" title={HR_CHANCE_INFO_TEXT}>{HR_CHANCE_LABEL}</th>
                           <th className="px-4 py-3">Edge</th>
                           <th className="px-4 py-3">Tier</th>
                           <th className="px-4 py-3">Lineup</th>
@@ -408,14 +444,14 @@ export default function HRHistoryClient() {
                             <td className="px-4 py-3">
                               <p className="font-medium text-slate-100">{row.batterName}</p>
                               <p className="text-xs text-slate-500">
-                                {row.teamId} vs {row.opponentTeamId}
+                                {getTeamAbbreviation(row.teamId)} vs {getTeamAbbreviation(row.opponentTeamId)}
                               </p>
                             </td>
                             <td className="px-4 py-3 font-semibold text-slate-100">
-                              {formatPercent(row.predictedProbability)}
+                              {formatProbabilityPercent(row.predictedProbability)}
                             </td>
                             <td className="px-4 py-3 text-slate-300">
-                              {row.edge == null ? '—' : formatPercent(row.edge)}
+                              {row.edge == null ? 'â€”' : formatEdgePercent(row.edge)}
                             </td>
                             <td className="px-4 py-3">
                               <span className={`rounded-md border px-2 py-1 text-xs font-medium ${getTierClass(row.tier)}`}>
@@ -448,6 +484,7 @@ export default function HRHistoryClient() {
     </div>
   );
 }
+
 
 
 

@@ -16,8 +16,23 @@ export interface HRTrainingExample {
 
   parkHrFactor: number;
   weatherHrImpactScore: number;
+  temperature: number;
+  humidity: number;
+  windSpeed: number;
+  windOutToCenter: number;
+  windInFromCenter: number;
+  crosswind: number;
+  pullSideWindBoost: number;
+  airDensityProxy: number;
+  densityAltitude: number;
+  parkIdNumeric: number;
+  parkHrFactorVsHand: number;
+  averageFenceDistance: number;
+  fenceDistanceIndex: number;
+  estimatedHrParksForTypical400FtFly: number;
   projectedAtBats: number;
   platoonEdge: number;
+  handednessInteraction: number;
   teamHrPerGame: number;
 
   last7HR: number;
@@ -32,6 +47,9 @@ export interface HRTrainingExample {
   pitcherRecentRisk: number;
   platoonPowerInteraction: number;
   environmentScore: number;
+  pitchMixMatchupScore: number;
+  pitcherVulnerabilityVsHand: number;
+  batterVsPitchMixPower: number;
 
   recentGamesWithHR: number;
   multiHRGamesLast30: number;
@@ -57,6 +75,15 @@ export interface LogisticModelArtifact {
     trainSize: number;
     validationSize: number;
   };
+}
+
+export type HRSlateEnvironmentLabel = 'low_hr' | 'medium_hr' | 'high_hr';
+
+export interface HRSlateExposureRecommendation {
+  minHitters: number;
+  maxHitters: number;
+  shouldConsiderSkip: boolean;
+  summary: string;
 }
 
 export interface HRBacktestMetrics {
@@ -99,8 +126,8 @@ export interface HRBacktestSlateSummary {
   averageSeasonHrPerGame: number;
   averagePredictedHrProbability: number;
   predictedHrEnvironmentScore: number;
-  actualEnvironmentLabel: 'low_hr' | 'medium_hr' | 'high_hr';
-  predictedEnvironmentLabel: 'low_hr' | 'medium_hr' | 'high_hr';
+  actualEnvironmentLabel: HRSlateEnvironmentLabel;
+  predictedEnvironmentLabel: HRSlateEnvironmentLabel;
 }
 
 export interface HRSlateEnvironmentMetrics {

@@ -6,6 +6,14 @@ import { fetchRecentBatterGameLogSummary } from '@/services/mlbPlayerGameLogServ
 import { fetchRecentPitcherFormSummary } from '@/services/mlbPitcherRecentFormService';
 import type { HRTrainingExample } from '@/services/ml/types';
 
+type ParkOnlySnapshotFields = Pick<
+  HRTrainingExample,
+  | 'parkHrFactorVsHand'
+  | 'averageFenceDistance'
+  | 'fenceDistanceIndex'
+  | 'estimatedHrParksForTypical400FtFly'
+>;
+
 function getSupabase() {
   return createSupabaseClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -29,6 +37,23 @@ function normalizeDateString(value: string): string {
 function getSeasonFromDate(value: string): number {
   const [year] = normalizeDateString(value).split('-').map(Number);
   return Number.isFinite(year) ? year : new Date().getFullYear();
+}
+
+function getParkOnlySnapshotFields(
+  example: ParkOnlySnapshotFields
+): Record<
+  | 'park_hr_factor_vs_hand'
+  | 'average_fence_distance'
+  | 'fence_distance_index'
+  | 'estimated_hr_parks_for_typical_400ft_fly',
+  number
+> {
+  return {
+    park_hr_factor_vs_hand: example.parkHrFactorVsHand,
+    average_fence_distance: example.averageFenceDistance,
+    fence_distance_index: example.fenceDistanceIndex,
+    estimated_hr_parks_for_typical_400ft_fly: example.estimatedHrParksForTypical400FtFly,
+  };
 }
 
 function sumHrCountForExactDate(
@@ -223,6 +248,7 @@ export async function saveSnapshotsForDate(date: string): Promise<SaveSnapshotRe
         pitcher_fb_pct: baseExample.pitcherFbPct,
 
         park_hr_factor: baseExample.parkHrFactor,
+        ...getParkOnlySnapshotFields(baseExample),
         weather_hr_impact_score: baseExample.weatherHrImpactScore,
         projected_at_bats: baseExample.projectedAtBats,
         platoon_edge: baseExample.platoonEdge,
@@ -432,8 +458,25 @@ export async function fetchTrainingExamplesFromSnapshots(filters?: {
 
     parkHrFactor: Number(row.park_hr_factor),
     weatherHrImpactScore: Number(row.weather_hr_impact_score),
+    temperature: Number(row.temperature ?? 70),
+    humidity: Number(row.humidity ?? 50),
+    windSpeed: Number(row.wind_speed ?? 0),
+    windOutToCenter: Number(row.wind_out_to_center ?? 0),
+    windInFromCenter: Number(row.wind_in_from_center ?? 0),
+    crosswind: Number(row.crosswind ?? 0),
+    pullSideWindBoost: Number(row.pull_side_wind_boost ?? 0),
+    airDensityProxy: Number(row.air_density_proxy ?? 1),
+    densityAltitude: Number(row.density_altitude ?? 0),
+    parkIdNumeric: Number(row.park_id_numeric ?? 0),
+    parkHrFactorVsHand: Number(row.park_hr_factor_vs_hand ?? Number(row.park_hr_factor ?? 1)),
+    averageFenceDistance: Number(row.average_fence_distance ?? 352),
+    fenceDistanceIndex: Number(row.fence_distance_index ?? 0),
+    estimatedHrParksForTypical400FtFly: Number(
+      row.estimated_hr_parks_for_typical_400ft_fly ?? 15
+    ),
     projectedAtBats: Number(row.projected_at_bats),
     platoonEdge: Number(row.platoon_edge),
+    handednessInteraction: Number(row.handedness_interaction ?? 0),
     teamHrPerGame: Number(row.team_hr_per_game),
 
     last7HR: Number(row.last7_hr),
@@ -448,6 +491,9 @@ export async function fetchTrainingExamplesFromSnapshots(filters?: {
     pitcherRecentRisk: Number(row.pitcher_recent_risk ?? 0),
     platoonPowerInteraction: Number(row.platoon_power_interaction ?? 0),
     environmentScore: Number(row.environment_score ?? 0),
+    pitchMixMatchupScore: Number(row.pitch_mix_matchup_score ?? 0),
+    pitcherVulnerabilityVsHand: Number(row.pitcher_vulnerability_vs_hand ?? Number(row.pitcher_hr9 ?? 0)),
+    batterVsPitchMixPower: Number(row.batter_vs_pitch_mix_power ?? 0),
 
     recentGamesWithHR: Number(row.recent_games_with_hr ?? 0),
     multiHRGamesLast30: Number(row.multi_hr_games_last30 ?? 0),

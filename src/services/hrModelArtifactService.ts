@@ -6,6 +6,10 @@ import {
   trainHRXGBoostModel,
 } from '@/services/ml/hrXGBoostModel';
 import {
+  getHRModelFeatureSet,
+  type HRModelFeatureSetName,
+} from '@/services/ml/hrFeatureEngineering';
+import {
   DEFAULT_SEASON_SAMPLE_WEIGHTS,
   normalizeSeasonSampleWeights,
   type SeasonSampleWeights,
@@ -46,8 +50,10 @@ export interface HRModelArtifact {
     positiveBoostFactor: number;
     negativeSampleRate: number;
     probabilityPower: number;
+    conservativeShrinkage: number;
     seasonSampleWeights: SeasonSampleWeights;
   };
+  featureSetName: string;
   standardization: StandardizationModel;
   calibration: CalibrationModel;
   featureNames: string[];
@@ -94,8 +100,11 @@ export async function trainAndSaveHRModelArtifact(options?: {
   trainingEndDate?: string;
   minRows?: number;
   seasonSampleWeights?: SeasonSampleWeights;
+  featureSetName?: HRModelFeatureSetName;
 }) {
   const trainingStartDate = options?.trainingStartDate ?? '2024-03-28';
+  const featureSetName = options?.featureSetName ?? 'production_default';
+  const featureNames = getHRModelFeatureSet(featureSetName);
   const seasonSampleWeights = normalizeSeasonSampleWeights(
     options?.seasonSampleWeights ?? DEFAULT_SEASON_SAMPLE_WEIGHTS
   );
@@ -118,6 +127,7 @@ export async function trainAndSaveHRModelArtifact(options?: {
       positiveBoostFactor: 6,
       negativeSampleRate: 1.0,
       probabilityPower: 0.85,
+      featureNames,
       seasonSampleWeights,
       calibrationExamples,
       testExamples,
@@ -133,6 +143,7 @@ export async function trainAndSaveHRModelArtifact(options?: {
     trainingExampleCount: trainingExamples.length,
     seasonSampleWeights,
     params: summary.params,
+    featureSetName,
     standardization,
     calibration,
     featureNames: summary.featureNames,
