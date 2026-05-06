@@ -5,6 +5,7 @@
  */
 
 import type { ConfidenceTier, PlatoonAdvantage, Batter, Pitcher, Game, Ballpark } from '@/types';
+import type { PitchGroup } from '@/services/pitchMixTaxonomy';
 
 // ─── Input Interfaces ────────────────────────────────────────────────────────
 
@@ -48,7 +49,7 @@ export interface PitcherProfile {
   fbPct?: number;
   era?: number;
   recentHr9?: number;
-  pitchMix?: Partial<Record<'FF' | 'SI' | 'FC' | 'SL' | 'CU' | 'CH' | 'FS' | 'KC', number>>;
+  pitchMix?: Partial<Record<PitchGroup, number>>;
   hr9AllowedVsLeft?: number;
   hr9AllowedVsRight?: number;
 }
@@ -83,8 +84,8 @@ export interface WeatherContext {
 }
 
 export interface PitchTypeMatchupContext {
-  batterPitchTypeSkill?: Partial<Record<'FF' | 'SI' | 'FC' | 'SL' | 'CU' | 'CH' | 'FS' | 'KC', number>>;
-  pitcherPitchMix?: Partial<Record<'FF' | 'SI' | 'FC' | 'SL' | 'CU' | 'CH' | 'FS' | 'KC', number>>;
+  batterPitchTypeSkill?: Partial<Record<PitchGroup, number>>;
+  pitcherPitchMix?: Partial<Record<PitchGroup, number>>;
 }
 
 export interface TeamOffensiveContext {

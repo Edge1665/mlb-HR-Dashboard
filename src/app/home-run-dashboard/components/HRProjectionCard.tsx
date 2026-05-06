@@ -6,6 +6,7 @@ import ProgressBar from '@/components/ui/ProgressBar';
 import StatPill from '@/components/ui/StatPill';
 import type { HRProjection, Batter, Pitcher, Game, Ballpark, Team } from '@/types';
 import { getConfidenceTierBg, getProbabilityColor, getPlatoonLabel, getPlatoonColor, formatAvg, getBarrelRateColor, getExitVeloColor, getParkFactorColor } from '@/lib/hrProjectionEngine';
+import { formatAwayHomeMatchup, formatDetailedAwayHomeMatchup } from '@/services/gamePresentation';
 
 interface HRProjectionCardProps {
   projection: HRProjection;
@@ -26,6 +27,7 @@ export default function HRProjectionCard({ projection, batter, pitcher, game, ba
     ? (game.awayTeamId === batter?.teamId ? game.homeTeamId : game.awayTeamId)
     : '';
   const oppTeam = teams[oppTeamId ?? ''];
+  const matchupLabel = game ? formatAwayHomeMatchup(game.awayTeamId, game.homeTeamId) : null;
 
   const probColor = getProbabilityColor(projection.hrProbability);
   const tierBg = getConfidenceTierBg(projection.confidenceTier);
@@ -92,11 +94,7 @@ export default function HRProjectionCard({ projection, batter, pitcher, game, ba
               {game && (
                 <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
                   {(() => {
-                    const awayTeam = teams[game.awayTeamId];
-                    const homeTeam = teams[game.homeTeamId];
-                    const matchup = awayTeam && homeTeam
-                      ? `${awayTeam.city} ${awayTeam.name} @ ${homeTeam.city} ${homeTeam.name}`
-                      : null;
+                    const matchup = formatDetailedAwayHomeMatchup(game, teams);
                     return matchup ? (
                       <span className="text-xs text-slate-500 truncate">{matchup}</span>
                     ) : null;
@@ -151,7 +149,7 @@ export default function HRProjectionCard({ projection, batter, pitcher, game, ba
           {oppTeam && (
             <>
               <span className="text-slate-500">·</span>
-              <span className="text-slate-500">{oppTeam.abbreviation}</span>
+              <span className="text-slate-500">{matchupLabel ?? oppTeam.abbreviation}</span>
             </>
           )}
           {ballpark && (

@@ -48,9 +48,11 @@ export async function GET() {
     for (const batter of batterList) {
       if (!batter?.id || !batter?.teamId) continue;
 
-      const game = games.find(
-        (g) => g.awayTeamId === batter.teamId || g.homeTeamId === batter.teamId
-      );
+      const game =
+        games.find((g) => g.id === batter.gameId) ??
+        games.find(
+          (g) => g.awayTeamId === batter.teamId || g.homeTeamId === batter.teamId
+        );
       if (!game) continue;
 
       const isHome = game.homeTeamId === batter.teamId;

@@ -2,12 +2,13 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import AppLogo from './ui/AppLogo';
-import { LayoutDashboard, CalendarDays, Search, ChevronLeft, ChevronRight, Target, Settings, Bell, History } from 'lucide-react';
+import { LayoutDashboard, CalendarDays, Search, ChevronLeft, ChevronRight, Target, Settings, Bell, History, ListOrdered } from 'lucide-react';
 import { useTodaysSlateSummary } from '@/hooks/useTodaysSlateSummary';
 
 
 const NAV_ITEMS = [
   { label: 'HR Dashboard', href: '/home-run-dashboard', icon: LayoutDashboard, badge: null, description: 'Top HR targets today' },
+  { label: 'HRR Board', href: '/hrr-board', icon: ListOrdered, badge: null, description: 'Hits + Runs + RBIs board' },
   { label: "Today\'s Games", href: '/today-s-games', icon: CalendarDays, badge: null, description: 'Live game context' },
   { label: 'Player Research', href: '/player-research', icon: Search, badge: null, description: 'Deep batter analysis' },
   { label: 'HR History', href: '/hr-history', icon: History, badge: null, description: 'Previous picks & outcomes' },

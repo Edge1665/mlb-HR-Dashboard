@@ -18,6 +18,118 @@ function isMissingSoftDeleteColumnError(error: { message?: string } | null | und
   return message.includes('is_deleted') || message.includes('deleted_at');
 }
 
+function isMissingSnapshotMetadataColumnError(
+  error: { message?: string } | null | undefined
+) {
+  const message = error?.message ?? '';
+  return message.includes('snapshot_type') || message.includes('filter_applied');
+}
+
+function isMissingEnhancedSnapshotColumnError(
+  error: { message?: string } | null | undefined
+) {
+  const message = error?.message ?? '';
+  return (
+    message.includes('raw_model_probability') ||
+    message.includes('calibrated_hr_probability') ||
+    message.includes('hr_tier') ||
+    message.includes('model_edge') ||
+    message.includes('value_score') ||
+    message.includes('value_tier') ||
+    message.includes('diagnostics')
+  );
+}
+
+async function insertSnapshotRecord(params: {
+  supabase: ReturnType<typeof getSupabase>;
+  targetDate: string;
+  sortMode: DailyBoardSortMode;
+  lineupMode: DailyBoardLineupMode;
+  snapshotKind: string;
+  snapshotType: 'filtered' | 'full';
+  filteringApplied: boolean;
+  generatedAt?: string | null;
+  trainingStartDate?: string | null;
+  trainingExampleCount?: number | null;
+  modelTrainedAt?: string | null;
+  rowLimit: number;
+  diagnostics?: Record<string, unknown> | null;
+  capturedAt: string;
+  metadataSupportedBySnapshotKind: boolean;
+}) {
+  const baseInsert = {
+    snapshot_date: params.targetDate,
+    board_type: params.sortMode,
+    lineup_mode: params.lineupMode,
+    generated_at: params.generatedAt ?? null,
+    captured_at: params.capturedAt,
+    training_start_date: params.trainingStartDate ?? null,
+    training_example_count: params.trainingExampleCount ?? null,
+    model_trained_at: params.modelTrainedAt ?? null,
+    row_limit: params.rowLimit,
+    is_deleted: false,
+    deleted_at: null,
+    updated_at: params.capturedAt,
+  };
+
+  const attempts = [
+    {
+      ...baseInsert,
+      snapshot_kind: params.snapshotKind,
+      snapshot_type: params.snapshotType,
+      filter_applied: params.filteringApplied,
+      diagnostics: params.diagnostics ?? null,
+    },
+    {
+      ...baseInsert,
+      snapshot_kind: params.metadataSupportedBySnapshotKind
+        ? params.snapshotKind
+        : `${params.snapshotKind}_${params.snapshotType}`,
+      diagnostics: params.diagnostics ?? null,
+    },
+    {
+      ...baseInsert,
+      snapshot_kind: params.snapshotKind,
+      snapshot_type: params.snapshotType,
+      filter_applied: params.filteringApplied,
+    },
+    {
+      ...baseInsert,
+      snapshot_kind: params.metadataSupportedBySnapshotKind
+        ? params.snapshotKind
+        : `${params.snapshotKind}_${params.snapshotType}`,
+    },
+  ];
+
+  let lastError: { message?: string } | null | undefined;
+
+  for (const payload of attempts) {
+    const response = await params.supabase
+      .from('hr_board_snapshots')
+      .insert(payload)
+      .select('*')
+      .single();
+
+    if (!response.error && response.data) {
+      return response;
+    }
+
+    lastError = response.error;
+    const retryable =
+      isMissingSnapshotMetadataColumnError(response.error) ||
+      isMissingEnhancedSnapshotColumnError(response.error);
+
+    if (!retryable) {
+      return response;
+    }
+  }
+
+  return {
+    data: null,
+    error: lastError ?? { message: 'Failed to save board snapshot.' },
+  };
+}
+
 function getTodayETDateString(): string {
   const now = new Date();
   const etDate = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
@@ -33,6 +145,8 @@ export interface SavedBoardSnapshotSummary {
   boardType: DailyBoardSortMode;
   lineupMode: DailyBoardLineupMode;
   snapshotKind: string;
+  snapshotType: 'filtered' | 'full';
+  filteringApplied: boolean;
   capturedAt: string;
   generatedAt: string | null;
   trainingStartDate: string | null;
@@ -44,6 +158,7 @@ export interface SavedBoardSnapshotSummary {
   scoredAt: string | null;
   isDeleted: boolean;
   deletedAt: string | null;
+  diagnostics?: Record<string, unknown> | null;
 }
 
 export type ValidationSnapshotType =
@@ -56,7 +171,8 @@ export type OfficialSnapshotKind =
   | 'official_early_full_day'
   | 'official_lock_time'
   | 'morning_full_day'
-  | 'pre_first_pitch';
+  | 'pre_first_pitch'
+  | 'dashboard_full_model';
 
 export interface SavedBoardSnapshotRow {
   rank: number;
@@ -65,17 +181,46 @@ export interface SavedBoardSnapshotRow {
   teamId: string;
   opponentTeamId: string;
   gameId: string;
+  hrTier?: string | null;
+  rawModelProbability?: number | null;
+  calibratedHrProbability?: number | null;
   predictedProbability: number;
   tier: string;
   sportsbookOddsAmerican: number | null;
+  modelEdge?: number | null;
   impliedProbability: number | null;
   edge: number | null;
+  valueScore?: number | null;
+  valueTier?: string | null;
   combinedScore: number | null;
   sportsbook: string | null;
   lineupConfirmed: boolean;
   actualHitHr: boolean | null;
   actualHrCount: number;
 }
+
+type SnapshotRowInput = {
+  rank: number;
+  batterId: string;
+  batterName: string;
+  teamId: string;
+  opponentTeamId: string;
+  gameId: string;
+  hrTier?: string | null;
+  rawModelProbability?: number | null;
+  calibratedHrProbability?: number | null;
+  predictedProbability: number;
+  tier: string;
+  sportsbookOddsAmerican: number | null;
+  modelEdge?: number | null;
+  impliedProbability: number | null;
+  edge: number | null;
+  valueScore?: number | null;
+  valueTier?: string | null;
+  combinedScore: number | null;
+  sportsbook: string | null;
+  lineupConfirmed: boolean;
+};
 
 export interface SavedBoardSnapshotHitPlayer {
   batterId: string;
@@ -85,7 +230,7 @@ export interface SavedBoardSnapshotHitPlayer {
 }
 
 export interface ValidationBoardSnapshot extends SavedBoardSnapshotSummary {
-  snapshotType: ValidationSnapshotType;
+  validationSnapshotType: ValidationSnapshotType;
   top15Hits: number | null;
   top25Hits: number | null;
   totalHits: number | null;
@@ -100,6 +245,8 @@ function mapSnapshotSummary(row: Record<string, unknown>): SavedBoardSnapshotSum
     boardType: row.board_type as DailyBoardSortMode,
     lineupMode: row.lineup_mode as DailyBoardLineupMode,
     snapshotKind: String(row.snapshot_kind),
+    snapshotType: row.snapshot_type === 'full' ? 'full' : 'filtered',
+    filteringApplied: row.filter_applied !== false,
     capturedAt: String(row.captured_at),
     generatedAt: row.generated_at ? String(row.generated_at) : null,
     trainingStartDate: row.training_start_date ? String(row.training_start_date) : null,
@@ -112,6 +259,10 @@ function mapSnapshotSummary(row: Record<string, unknown>): SavedBoardSnapshotSum
     scoredAt: row.scored_at ? String(row.scored_at) : null,
     isDeleted: Boolean(row.is_deleted),
     deletedAt: row.deleted_at ? String(row.deleted_at) : null,
+    diagnostics:
+      row.diagnostics && typeof row.diagnostics === 'object'
+        ? (row.diagnostics as Record<string, unknown>)
+        : null,
   };
 }
 
@@ -123,13 +274,23 @@ function mapSnapshotRow(row: Record<string, unknown>): SavedBoardSnapshotRow {
     teamId: String(row.team_id),
     opponentTeamId: String(row.opponent_team_id),
     gameId: String(row.game_id),
+    hrTier: row.hr_tier ? String(row.hr_tier) : null,
+    rawModelProbability:
+      row.raw_model_probability != null ? Number(row.raw_model_probability) : null,
+    calibratedHrProbability:
+      row.calibrated_hr_probability != null
+        ? Number(row.calibrated_hr_probability)
+        : null,
     predictedProbability: Number(row.predicted_probability),
     tier: String(row.tier),
     sportsbookOddsAmerican:
       row.sportsbook_odds_american != null ? Number(row.sportsbook_odds_american) : null,
+    modelEdge: row.model_edge != null ? Number(row.model_edge) : null,
     impliedProbability:
       row.implied_probability != null ? Number(row.implied_probability) : null,
     edge: row.edge != null ? Number(row.edge) : null,
+    valueScore: row.value_score != null ? Number(row.value_score) : null,
+    valueTier: row.value_tier ? String(row.value_tier) : null,
     combinedScore: row.combined_score != null ? Number(row.combined_score) : null,
     sportsbook: row.sportsbook ? String(row.sportsbook) : null,
     lineupConfirmed: Boolean(row.lineup_confirmed),
@@ -190,7 +351,7 @@ function mapValidationSnapshot(
 
   return {
     ...summary,
-    snapshotType: normalizeSnapshotType(summary.snapshotKind),
+    validationSnapshotType: normalizeSnapshotType(summary.snapshotKind),
     top5Hits: scored ? computeHitCount(rows, 5) : summary.top5Hits,
     top10Hits: scored ? computeHitCount(rows, 10) : summary.top10Hits,
     top15Hits: scored ? computeHitCount(rows, 15) : null,
@@ -206,6 +367,7 @@ export async function saveOfficialBoardSnapshot(options: {
   sortMode: DailyBoardSortMode;
   lineupMode?: DailyBoardLineupMode;
   snapshotKind?: OfficialSnapshotKind;
+  snapshotType?: 'filtered' | 'full';
   limit?: number;
   trainingStartDate?: string;
   sportsbooks?: string[];
@@ -220,6 +382,12 @@ export async function saveOfficialBoardSnapshot(options: {
     sportsbooks: options.sportsbooks,
   });
   const snapshotKind = options.snapshotKind ?? 'official';
+  const snapshotType = options.snapshotType ?? 'filtered';
+  const rowsToSave = snapshotType === 'full' ? board.fullRows : board.rows;
+  const filteringApplied = snapshotType === 'filtered';
+  const metadataSupportedBySnapshotKind =
+    snapshotType === 'filtered' ||
+    snapshotKind === 'dashboard_full_model';
 
   let existingSnapshot = await supabase
     .from('hr_board_snapshots')
@@ -228,10 +396,24 @@ export async function saveOfficialBoardSnapshot(options: {
     .eq('board_type', board.sortMode)
     .eq('lineup_mode', board.lineupMode)
     .eq('snapshot_kind', snapshotKind)
+    .eq('snapshot_type', snapshotType)
     .eq('is_deleted', false)
     .maybeSingle();
 
-  if (isMissingSoftDeleteColumnError(existingSnapshot.error)) {
+  if (isMissingSnapshotMetadataColumnError(existingSnapshot.error)) {
+    existingSnapshot = await supabase
+      .from('hr_board_snapshots')
+      .select('id')
+      .eq('snapshot_date', board.targetDate)
+      .eq('board_type', board.sortMode)
+      .eq('lineup_mode', board.lineupMode)
+      .eq(
+        'snapshot_kind',
+        metadataSupportedBySnapshotKind ? snapshotKind : `${snapshotKind}_${snapshotType}`
+      )
+      .eq('is_deleted', false)
+      .maybeSingle();
+  } else if (isMissingSoftDeleteColumnError(existingSnapshot.error)) {
     existingSnapshot = await supabase
       .from('hr_board_snapshots')
       .select('id')
@@ -239,7 +421,22 @@ export async function saveOfficialBoardSnapshot(options: {
       .eq('board_type', board.sortMode)
       .eq('lineup_mode', board.lineupMode)
       .eq('snapshot_kind', snapshotKind)
+      .eq('snapshot_type', snapshotType)
       .maybeSingle();
+
+    if (isMissingSnapshotMetadataColumnError(existingSnapshot.error)) {
+      existingSnapshot = await supabase
+        .from('hr_board_snapshots')
+        .select('id')
+        .eq('snapshot_date', board.targetDate)
+        .eq('board_type', board.sortMode)
+        .eq('lineup_mode', board.lineupMode)
+        .eq(
+          'snapshot_kind',
+          metadataSupportedBySnapshotKind ? snapshotKind : `${snapshotKind}_${snapshotType}`
+        )
+        .maybeSingle();
+    }
   }
 
   if (existingSnapshot.error) {
@@ -260,32 +457,31 @@ export async function saveOfficialBoardSnapshot(options: {
     if (deleteSnapshotError) throw new Error(deleteSnapshotError.message);
   }
 
-  const snapshotInsert = await supabase
-    .from('hr_board_snapshots')
-    .insert({
-      snapshot_date: board.targetDate,
-      board_type: board.sortMode,
-      lineup_mode: board.lineupMode,
-      snapshot_kind: snapshotKind,
-      generated_at: board.generatedAt,
-      captured_at: new Date().toISOString(),
-      training_start_date: board.trainingStartDate,
-      training_example_count: board.trainingExampleCount,
-      model_trained_at: board.modelTrainedAt,
-      row_limit: board.rows.length,
-      is_deleted: false,
-      deleted_at: null,
-      updated_at: new Date().toISOString(),
-    })
-    .select('*')
-    .single();
+  const capturedAt = new Date().toISOString();
+  const snapshotInsert = await insertSnapshotRecord({
+    supabase,
+    targetDate: board.targetDate,
+    sortMode: board.sortMode,
+    lineupMode: board.lineupMode,
+    snapshotKind,
+    snapshotType,
+    filteringApplied,
+    generatedAt: board.generatedAt,
+    trainingStartDate: board.trainingStartDate,
+    trainingExampleCount: board.trainingExampleCount,
+    modelTrainedAt: board.modelTrainedAt,
+    rowLimit: rowsToSave.length,
+    diagnostics: board.diagnostics,
+    capturedAt,
+    metadataSupportedBySnapshotKind,
+  });
 
   if (snapshotInsert.error || !snapshotInsert.data) {
     throw new Error(snapshotInsert.error?.message ?? 'Failed to save board snapshot.');
   }
 
   const snapshotId = String(snapshotInsert.data.id);
-  const rowInserts = board.rows.map((row) => ({
+  const rowInserts = rowsToSave.map((row) => ({
     snapshot_id: snapshotId,
     rank: row.rank,
     batter_id: row.batterId,
@@ -293,11 +489,17 @@ export async function saveOfficialBoardSnapshot(options: {
     team_id: row.teamId,
     opponent_team_id: row.opponentTeamId,
     game_id: row.gameId,
+    hr_tier: row.hrTier ?? null,
+    raw_model_probability: row.rawModelProbability ?? null,
+    calibrated_hr_probability: row.calibratedHrProbability ?? null,
     predicted_probability: row.predictedProbability,
     tier: row.tier,
     sportsbook_odds_american: row.sportsbookOddsAmerican,
+    model_edge: row.modelEdge ?? null,
     implied_probability: row.impliedProbability,
     edge: row.edge,
+    value_score: row.valueScore ?? null,
+    value_tier: row.valueTier ?? null,
     combined_score: row.combinedScore,
     sportsbook: row.sportsbook,
     lineup_confirmed: row.lineupConfirmed,
@@ -306,15 +508,256 @@ export async function saveOfficialBoardSnapshot(options: {
     updated_at: new Date().toISOString(),
   }));
 
-  const insertedRows = await supabase
+  let insertedRows = await supabase
     .from('hr_board_snapshot_rows')
     .insert(rowInserts)
     .select('*')
     .order('rank', { ascending: true });
 
+  if (isMissingEnhancedSnapshotColumnError(insertedRows.error)) {
+    insertedRows = await supabase
+      .from('hr_board_snapshot_rows')
+      .insert(
+        rowsToSave.map((row) => ({
+          snapshot_id: snapshotId,
+          rank: row.rank,
+          batter_id: row.batterId,
+          batter_name: row.batterName,
+          team_id: row.teamId,
+          opponent_team_id: row.opponentTeamId,
+          game_id: row.gameId,
+          predicted_probability: row.predictedProbability,
+          tier: row.tier,
+          sportsbook_odds_american: row.sportsbookOddsAmerican,
+          implied_probability: row.impliedProbability,
+          edge: row.edge,
+          combined_score: row.combinedScore,
+          sportsbook: row.sportsbook,
+          lineup_confirmed: row.lineupConfirmed,
+          actual_hit_hr: null,
+          actual_hr_count: 0,
+          updated_at: new Date().toISOString(),
+        }))
+      )
+      .select('*')
+      .order('rank', { ascending: true });
+  }
+
   if (insertedRows.error) {
     throw new Error(insertedRows.error.message);
   }
+
+  console.info('[hrBoardSnapshotService] Saved official board snapshot', {
+    snapshotId,
+    snapshotKind,
+    snapshotType,
+    rowCount: rowsToSave.length,
+    filteringApplied,
+    boardType: board.sortMode,
+    lineupMode: board.lineupMode,
+    targetDate: board.targetDate,
+  });
+
+  return {
+    snapshot: mapSnapshotSummary(snapshotInsert.data as Record<string, unknown>),
+    rows: (insertedRows.data ?? []).map((row) =>
+      mapSnapshotRow(row as Record<string, unknown>)
+    ),
+  };
+}
+
+export async function saveCustomBoardSnapshot(options: {
+  targetDate: string;
+  sortMode: DailyBoardSortMode;
+  lineupMode: DailyBoardLineupMode;
+  snapshotKind?: OfficialSnapshotKind | 'dashboard_filtered';
+  snapshotType: 'filtered' | 'full';
+  filteringApplied: boolean;
+  rows: SnapshotRowInput[];
+  generatedAt?: string | null;
+  trainingStartDate?: string | null;
+  trainingExampleCount?: number | null;
+  modelTrainedAt?: string | null;
+  diagnostics?: Record<string, unknown> | null;
+}) {
+  const supabase = getSupabase();
+  const snapshotKind = options.snapshotKind ?? 'dashboard_filtered';
+  const metadataSupportedBySnapshotKind =
+    options.snapshotType === 'filtered' ||
+    snapshotKind === 'dashboard_full_model';
+
+  let existingSnapshot = await supabase
+    .from('hr_board_snapshots')
+    .select('id')
+    .eq('snapshot_date', options.targetDate)
+    .eq('board_type', options.sortMode)
+    .eq('lineup_mode', options.lineupMode)
+    .eq('snapshot_kind', snapshotKind)
+    .eq('snapshot_type', options.snapshotType)
+    .eq('is_deleted', false)
+    .maybeSingle();
+
+  if (isMissingSnapshotMetadataColumnError(existingSnapshot.error)) {
+    existingSnapshot = await supabase
+      .from('hr_board_snapshots')
+      .select('id')
+      .eq('snapshot_date', options.targetDate)
+      .eq('board_type', options.sortMode)
+      .eq('lineup_mode', options.lineupMode)
+      .eq(
+        'snapshot_kind',
+        metadataSupportedBySnapshotKind
+          ? snapshotKind
+          : `${snapshotKind}_${options.snapshotType}`
+      )
+      .eq('is_deleted', false)
+      .maybeSingle();
+  } else if (isMissingSoftDeleteColumnError(existingSnapshot.error)) {
+    existingSnapshot = await supabase
+      .from('hr_board_snapshots')
+      .select('id')
+      .eq('snapshot_date', options.targetDate)
+      .eq('board_type', options.sortMode)
+      .eq('lineup_mode', options.lineupMode)
+      .eq('snapshot_kind', snapshotKind)
+      .eq('snapshot_type', options.snapshotType)
+      .maybeSingle();
+
+    if (isMissingSnapshotMetadataColumnError(existingSnapshot.error)) {
+      existingSnapshot = await supabase
+        .from('hr_board_snapshots')
+        .select('id')
+        .eq('snapshot_date', options.targetDate)
+        .eq('board_type', options.sortMode)
+        .eq('lineup_mode', options.lineupMode)
+        .eq(
+          'snapshot_kind',
+          metadataSupportedBySnapshotKind
+            ? snapshotKind
+            : `${snapshotKind}_${options.snapshotType}`
+        )
+        .maybeSingle();
+    }
+  }
+
+  if (existingSnapshot.error) {
+    throw new Error(existingSnapshot.error.message);
+  }
+
+  if (existingSnapshot.data?.id) {
+    const { error: deleteRowsError } = await supabase
+      .from('hr_board_snapshot_rows')
+      .delete()
+      .eq('snapshot_id', existingSnapshot.data.id);
+    if (deleteRowsError) throw new Error(deleteRowsError.message);
+
+    const { error: deleteSnapshotError } = await supabase
+      .from('hr_board_snapshots')
+      .delete()
+      .eq('id', existingSnapshot.data.id);
+    if (deleteSnapshotError) throw new Error(deleteSnapshotError.message);
+  }
+
+  const capturedAt = new Date().toISOString();
+  const snapshotInsert = await insertSnapshotRecord({
+    supabase,
+    targetDate: options.targetDate,
+    sortMode: options.sortMode,
+    lineupMode: options.lineupMode,
+    snapshotKind,
+    snapshotType: options.snapshotType,
+    filteringApplied: options.filteringApplied,
+    generatedAt: options.generatedAt ?? null,
+    trainingStartDate: options.trainingStartDate ?? null,
+    trainingExampleCount: options.trainingExampleCount ?? null,
+    modelTrainedAt: options.modelTrainedAt ?? null,
+    rowLimit: options.rows.length,
+    diagnostics: options.diagnostics ?? null,
+    capturedAt,
+    metadataSupportedBySnapshotKind,
+  });
+
+  if (snapshotInsert.error || !snapshotInsert.data) {
+    throw new Error(snapshotInsert.error?.message ?? 'Failed to save board snapshot.');
+  }
+
+  const snapshotId = String(snapshotInsert.data.id);
+  const rowInserts = options.rows.map((row) => ({
+    snapshot_id: snapshotId,
+    rank: row.rank,
+    batter_id: row.batterId,
+    batter_name: row.batterName,
+    team_id: row.teamId,
+    opponent_team_id: row.opponentTeamId,
+    game_id: row.gameId,
+    hr_tier: row.hrTier ?? null,
+    raw_model_probability: row.rawModelProbability ?? null,
+    calibrated_hr_probability: row.calibratedHrProbability ?? null,
+    predicted_probability: row.predictedProbability,
+    tier: row.tier,
+    sportsbook_odds_american: row.sportsbookOddsAmerican,
+    model_edge: row.modelEdge ?? null,
+    implied_probability: row.impliedProbability,
+    edge: row.edge,
+    value_score: row.valueScore ?? null,
+    value_tier: row.valueTier ?? null,
+    combined_score: row.combinedScore,
+    sportsbook: row.sportsbook,
+    lineup_confirmed: row.lineupConfirmed,
+    actual_hit_hr: null,
+    actual_hr_count: 0,
+    updated_at: capturedAt,
+  }));
+
+  let insertedRows = await supabase
+    .from('hr_board_snapshot_rows')
+    .insert(rowInserts)
+    .select('*')
+    .order('rank', { ascending: true });
+
+  if (isMissingEnhancedSnapshotColumnError(insertedRows.error)) {
+    insertedRows = await supabase
+      .from('hr_board_snapshot_rows')
+      .insert(
+        options.rows.map((row) => ({
+          snapshot_id: snapshotId,
+          rank: row.rank,
+          batter_id: row.batterId,
+          batter_name: row.batterName,
+          team_id: row.teamId,
+          opponent_team_id: row.opponentTeamId,
+          game_id: row.gameId,
+          predicted_probability: row.predictedProbability,
+          tier: row.tier,
+          sportsbook_odds_american: row.sportsbookOddsAmerican,
+          implied_probability: row.impliedProbability,
+          edge: row.edge,
+          combined_score: row.combinedScore,
+          sportsbook: row.sportsbook,
+          lineup_confirmed: row.lineupConfirmed,
+          actual_hit_hr: null,
+          actual_hr_count: 0,
+          updated_at: capturedAt,
+        }))
+      )
+      .select('*')
+      .order('rank', { ascending: true });
+  }
+
+  if (insertedRows.error) {
+    throw new Error(insertedRows.error.message);
+  }
+
+  console.info('[hrBoardSnapshotService] Saved custom dashboard snapshot', {
+    snapshotId,
+    snapshotKind,
+    snapshotType: options.snapshotType,
+    rowCount: options.rows.length,
+    filteringApplied: options.filteringApplied,
+    boardType: options.sortMode,
+    lineupMode: options.lineupMode,
+    targetDate: options.targetDate,
+  });
 
   return {
     snapshot: mapSnapshotSummary(snapshotInsert.data as Record<string, unknown>),
@@ -338,6 +781,8 @@ export async function scoreBoardSnapshotsForDate(date: string) {
       'official_lock_time',
       'morning_full_day',
       'pre_first_pitch',
+      'dashboard_filtered',
+      'dashboard_full_model',
     ])
     .order('captured_at', { ascending: false });
 
@@ -352,6 +797,8 @@ export async function scoreBoardSnapshotsForDate(date: string) {
         'official_lock_time',
         'morning_full_day',
         'pre_first_pitch',
+        'dashboard_filtered',
+        'dashboard_full_model',
       ])
       .order('captured_at', { ascending: false });
   }
@@ -550,6 +997,8 @@ export async function fetchBoardSnapshotHistory(date?: string, options?: { inclu
       'official_lock_time',
       'morning_full_day',
       'pre_first_pitch',
+      'dashboard_filtered',
+      'dashboard_full_model',
     ])
     .order('snapshot_date', { ascending: false })
     .order('captured_at', { ascending: false });
@@ -638,6 +1087,8 @@ export async function fetchBoardSnapshotValidationData(
       'official_lock_time',
       'morning_full_day',
       'pre_first_pitch',
+      'dashboard_filtered',
+      'dashboard_full_model',
     ])
     .order('snapshot_date', { ascending: false })
     .order('captured_at', { ascending: false });
@@ -666,21 +1117,35 @@ export async function fetchBoardSnapshotValidationData(
     return [] as ValidationBoardSnapshot[];
   }
 
-  const rowResult = await supabase
-    .from('hr_board_snapshot_rows')
-    .select('*')
-    .in(
-      'snapshot_id',
-      snapshotRows.map((row) => String(row.id))
-    )
-    .order('rank', { ascending: true });
+  const snapshotIds = snapshotRows.map((row) => String(row.id));
+  const allRowData: Record<string, unknown>[] = [];
+  const pageSize = 1000;
+  let from = 0;
 
-  if (rowResult.error) {
-    throw new Error(rowResult.error.message);
+  while (true) {
+    const rowResult = await supabase
+      .from('hr_board_snapshot_rows')
+      .select('*')
+      .in('snapshot_id', snapshotIds)
+      .order('rank', { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (rowResult.error) {
+      throw new Error(rowResult.error.message);
+    }
+
+    const pageRows = (rowResult.data ?? []) as Record<string, unknown>[];
+    allRowData.push(...pageRows);
+
+    if (pageRows.length < pageSize) {
+      break;
+    }
+
+    from += pageSize;
   }
 
   const rowsBySnapshotId = new Map<string, SavedBoardSnapshotRow[]>();
-  for (const row of (rowResult.data ?? []) as Record<string, unknown>[]) {
+  for (const row of allRowData) {
     const mapped = mapSnapshotRow(row);
     const snapshotId = String((row as Record<string, unknown>).snapshot_id);
     const bucket = rowsBySnapshotId.get(snapshotId) ?? [];

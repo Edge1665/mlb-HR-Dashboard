@@ -7,7 +7,11 @@
 import type { Batter, Pitcher, Game, Ballpark, Team, Weather } from '@/types';
 import { fetchTodaysMLBSchedule, type RealMLBGame } from './mlbApi';
 import { fetchGameLineup } from './lineupService';
-import { fetchWeatherForTeamHomePark, getNeutralWeather } from '@/services/weatherService';
+import {
+  fetchWeatherForTeamHomeParkAtDateDetailed,
+  getNeutralWeather,
+} from '@/services/weatherService';
+import { fetchSeasonPitchMixDataset } from '@/services/pitchMixDataService';
 
 const MLB_API_BASE = 'https://statsapi.mlb.com/api/v1';
 
@@ -32,8 +36,24 @@ function isTodayETDate(date: string): boolean {
   return normalizeTargetDate(date) === normalizeTargetDate();
 }
 
+function formatEasternGameDate(value?: string): string {
+  if (!value) return normalizeTargetDate();
+
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) {
+    return value.slice(0, 10);
+  }
+
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(parsed);
+}
+
 function toGameWeather(
-  weather: Awaited<ReturnType<typeof fetchWeatherForTeamHomePark>> | null
+  weather: Awaited<ReturnType<typeof fetchWeatherForTeamHomeParkAtDateDetailed>>['weather']
 ): Weather {
   if (!weather) {
     return {
@@ -124,7 +144,7 @@ const PARK_FACTORS: Record<number, { hrFactor: number; elevation: number; name: 
   4:    { hrFactor: 1.06,  elevation: 595,  name: 'Guaranteed Rate Field' },   // CWS
   5:    { hrFactor: 0.94,  elevation: 489,  name: 'Great American Ball Park' },// CIN (old id)
   15:   { hrFactor: 1.28,  elevation: 489,  name: 'Great American Ball Park' },// CIN
-  17:   { hrFactor: 0.88,  elevation: 600,  name: 'Comerica Park' },           // DET
+  17:   { hrFactor: 1.04,  elevation: 595,  name: 'Wrigley Field' },           // CHC
   19:   { hrFactor: 1.38,  elevation: 5280, name: 'Coors Field' },             // COL
   22:   { hrFactor: 0.97,  elevation: 830,  name: 'Target Field' },            // MIN
   26:   { hrFactor: 1.16,  elevation: 551,  name: 'Globe Life Field' },        // TEX
@@ -152,8 +172,54 @@ const PARK_FACTORS: Record<number, { hrFactor: number; elevation: number; name: 
   5000: { hrFactor: 1.00,  elevation: 20,   name: 'Sahlen Field' },            // BUF
 };
 
+const PARK_FACTORS_BY_VENUE_NAME: Record<string, { hrFactor: number; elevation: number }> = {
+  'american family field': { hrFactor: 1.14, elevation: 840 },
+  'busch stadium': { hrFactor: 1.0, elevation: 20 },
+  'camden yards': { hrFactor: 1.05, elevation: 20 },
+  'chase field': { hrFactor: 1.1, elevation: 840 },
+  'citizens bank park': { hrFactor: 1.22, elevation: 20 },
+  'citi field': { hrFactor: 1.12, elevation: 20 },
+  'comerica park': { hrFactor: 0.88, elevation: 600 },
+  'coors field': { hrFactor: 1.38, elevation: 5280 },
+  'dodger stadium': { hrFactor: 0.98, elevation: 512 },
+  'fenway park': { hrFactor: 0.92, elevation: 20 },
+  'globe life field': { hrFactor: 1.16, elevation: 551 },
+  'great american ball park': { hrFactor: 0.94, elevation: 489 },
+  'guaranteed rate field': { hrFactor: 1.06, elevation: 595 },
+  'loandepot park': { hrFactor: 1.02, elevation: 15 },
+  'loanDepot park': { hrFactor: 1.02, elevation: 15 },
+  'minute maid park': { hrFactor: 1.06, elevation: 43 },
+  'nationals park': { hrFactor: 1.0, elevation: 20 },
+  'oracle park': { hrFactor: 0.82, elevation: 12 },
+  'petco park': { hrFactor: 1.02, elevation: 20 },
+  'pnc park': { hrFactor: 1.0, elevation: 20 },
+  'progressive field': { hrFactor: 1.0, elevation: 20 },
+  'sutter health park': { hrFactor: 1.0, elevation: 20 },
+  'target field': { hrFactor: 0.97, elevation: 830 },
+  't-mobile park': { hrFactor: 0.94, elevation: 17 },
+  'tropicana field': { hrFactor: 0.96, elevation: 20 },
+  'truist park': { hrFactor: 1.08, elevation: 1050 },
+  'wrigley field': { hrFactor: 1.04, elevation: 595 },
+  'yankee stadium': { hrFactor: 1.18, elevation: 55 },
+};
+
+function normalizeVenueName(venueName: string): string {
+  return venueName.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+}
+
 function getParkData(venueId: number, venueName: string): { hrFactor: number; elevation: number; name: string } {
-  return PARK_FACTORS[venueId] ?? { hrFactor: 1.0, elevation: 20, name: venueName };
+  const officialVenue = venueName?.trim() || 'Unknown Venue';
+  const byName = PARK_FACTORS_BY_VENUE_NAME[normalizeVenueName(officialVenue)];
+  if (byName) {
+    return { ...byName, name: officialVenue };
+  }
+
+  const byId = PARK_FACTORS[venueId];
+  if (byId) {
+    return { hrFactor: byId.hrFactor, elevation: byId.elevation, name: officialVenue };
+  }
+
+  return { hrFactor: 1.0, elevation: 20, name: officialVenue };
 }
 
 function getDefaultParkDimensions(venueId: number) {
@@ -317,13 +383,15 @@ interface MLBPitcherStats {
   avgFastballVelo: number;
   gamesStarted: number;
   innings: number;
+  hr9AllowedVsLeft: number;
+  hr9AllowedVsRight: number;
 }
 
 async function fetchPitcherStats(pitcherId: number, season: number): Promise<MLBPitcherStats | null> {
   if (!pitcherId || pitcherId <= 0) return null;
   try {
     const res = await fetchWithTimeout(
-      `${MLB_API_BASE}/people/${pitcherId}?hydrate=stats(group=[pitching],type=[season,statSplits],season=${season})`,
+      `${MLB_API_BASE}/people/${pitcherId}?hydrate=stats(group=[pitching],type=[season,statSplits],season=${season},sitCodes=[vl,vr])`,
       { cache: 'no-store', timeoutMs: 8000 }
     );
     if (!res.ok) return null;
@@ -348,6 +416,24 @@ async function fetchPitcherStats(pitcherId: number, season: number): Promise<MLB
     const kPer9 = ip > 0 ? (k / ip) * 9 : 8.5;
     const bbPer9 = ip > 0 ? (bb / ip) * 9 : 3.0;
     const gs = parseInt(seasonStats.gamesStarted ?? '0', 10) || 0;
+    const splitStats = person.stats?.find(
+      (s: { type?: { displayName?: string }; group?: { displayName?: string } }) =>
+        s.type?.displayName === 'statSplits' && s.group?.displayName === 'pitching'
+    )?.splits ?? [];
+
+    let hr9AllowedVsLeft = Math.round(hr9 * 100) / 100;
+    let hr9AllowedVsRight = Math.round(hr9 * 100) / 100;
+
+    for (const split of splitStats) {
+      const code = split?.split?.code;
+      const stat = split?.stat;
+      const splitIp = parseFloat(stat?.inningsPitched ?? '0') || 0;
+      const splitHr = parseInt(stat?.homeRuns ?? '0', 10) || 0;
+      const splitHr9 = splitIp > 0 ? Number(((splitHr / splitIp) * 9).toFixed(2)) : Number(hr9.toFixed(2));
+
+      if (code === 'vl') hr9AllowedVsLeft = splitHr9;
+      if (code === 'vr') hr9AllowedVsRight = splitHr9;
+    }
 
     return {
       era,
@@ -360,6 +446,8 @@ async function fetchPitcherStats(pitcherId: number, season: number): Promise<MLB
       avgFastballVelo: 93.5, // MLB Stats API doesn't expose velo directly; use league avg
       gamesStarted: gs,
       innings: ip,
+      hr9AllowedVsLeft,
+      hr9AllowedVsRight,
     };
   } catch {
     return null;
@@ -666,6 +754,13 @@ export interface LiveMLBData {
   games: Game[];
   ballparks: Record<string, Ballpark>;
   teams: Record<string, Team>;
+  weatherDiagnostics?: {
+    historicalRequested: number;
+    historicalSuccess: number;
+    historicalFallbacks: number;
+    historicalAuthFailures: number;
+    failureReasons: string[];
+  };
 }
 
 export async function fetchLiveMLBData(targetDate?: string): Promise<LiveMLBData> {
@@ -674,19 +769,30 @@ export async function fetchLiveMLBData(targetDate?: string): Promise<LiveMLBData
   const games: Game[] = [];
   const ballparks: Record<string, Ballpark> = {};
   const teams: Record<string, Team> = {};
+  const weatherDiagnostics = {
+    historicalRequested: 0,
+    historicalSuccess: 0,
+    historicalFallbacks: 0,
+    historicalAuthFailures: 0,
+    failureReasons: new Set<string>(),
+  };
   const normalizedTargetDate = normalizeTargetDate(targetDate);
   const season = getSeasonFromDate(normalizedTargetDate);
   const allowRosterFallback = isTodayETDate(normalizedTargetDate);
-  const allowLiveWeather = isTodayETDate(normalizedTargetDate);
 
   // 1. Fetch the target-date schedule AND season-aligned Statcast leaderboard in parallel
   let schedule: RealMLBGame[] = [];
   let statcastMap: Record<string, StatcastRow> = {};
+  let pitchMixDataset = {
+    pitchersById: {},
+    battersById: {},
+  } as Awaited<ReturnType<typeof fetchSeasonPitchMixDataset>>;
 
   try {
-    [schedule, statcastMap] = await Promise.all([
+    [schedule, statcastMap, pitchMixDataset] = await Promise.all([
       fetchTodaysMLBSchedule(normalizedTargetDate),
       fetchStatcastLeaderboard(season),
+      fetchSeasonPitchMixDataset(season),
     ]);
   } catch (err) {
     console.error('[liveMLBData] Schedule fetch failed:', err);
@@ -738,7 +844,7 @@ export async function fetchLiveMLBData(targetDate?: string): Promise<LiveMLBData
       const dimensionBundle = buildDimensionContext(dimensions, park.hrFactor, park.elevation);
       ballparks[parkId] = {
         id: parkId,
-        name: park.name,
+        name: g.venueName,
         city: g.venueName,
         teamId: homeId,
         hrFactor: park.hrFactor,
@@ -765,6 +871,7 @@ export async function fetchLiveMLBData(targetDate?: string): Promise<LiveMLBData
     pitcherFetchPromises.push(
       (async () => {
         const stats = await fetchPitcherStats(pid, season);
+        const pitchMixProfile = pitchMixDataset.pitchersById[String(pid)];
         // Find which game/team this pitcher belongs to
         const game = schedule.find(
           g => g.awayProbablePitcher?.id === pid || g.homeProbablePitcher?.id === pid
@@ -795,10 +902,12 @@ export async function fetchLiveMLBData(targetDate?: string): Promise<LiveMLBData
             hr9: stats?.hr9 ?? 1.2,
           },
           last7: { era: stats?.era ?? 4.50, hr9: stats?.hr9 ?? 1.2 },
-          pitchMix: {},
+          pitchMix: pitchMixProfile?.pitchMix ?? {},
           handednessHrAllowed: {
-            source: 'pitch-mix-data-not-yet-sourced',
-            isPlaceholder: true,
+            vsLeftHr9: stats?.hr9AllowedVsLeft,
+            vsRightHr9: stats?.hr9AllowedVsRight,
+            source: stats ? 'mlb-statsapi-statSplits' : 'pitch-mix-data-not-yet-sourced',
+            isPlaceholder: !stats,
           },
         };
       })()
@@ -853,13 +962,42 @@ export async function fetchLiveMLBData(targetDate?: string): Promise<LiveMLBData
 
         const awayLineupConfirmed = lineup?.away?.status === 'confirmed';
     const homeLineupConfirmed = lineup?.home?.status === 'confirmed';
-    const liveWeather = allowLiveWeather
-      ? await fetchWeatherForTeamHomePark(String(g.homeTeamId))
-      : null;
+    const weatherResult = await fetchWeatherForTeamHomeParkAtDateDetailed(
+      String(g.homeTeamId),
+      g.gameDate
+    );
+    const liveWeather = weatherResult.weather;
+
+    if (!isTodayETDate(normalizedTargetDate)) {
+      weatherDiagnostics.historicalRequested += 1;
+      if (weatherResult.source === 'historical' && liveWeather) {
+        weatherDiagnostics.historicalSuccess += 1;
+      }
+      if (weatherResult.source === 'fallback') {
+        weatherDiagnostics.historicalFallbacks += 1;
+        if (weatherResult.failureReason) {
+          weatherDiagnostics.failureReasons.add(weatherResult.failureReason);
+          if (weatherResult.failureReason === 'http_401') {
+            weatherDiagnostics.historicalAuthFailures += 1;
+          }
+        }
+      }
+    }
+
+    if (!liveWeather && !isTodayETDate(normalizedTargetDate)) {
+      console.warn('[weather:historical] Falling back to neutral weather', {
+        targetDate: normalizedTargetDate,
+        gamePk: g.gamePk,
+        gameDate: g.gameDate,
+        homeTeamId: g.homeTeamId,
+        venueId: g.venueId,
+        venueName: g.venueName,
+      });
+    }
 
     const game: Game = {
       id: String(g.gamePk),
-      date: g.gameDate.split('T')[0] ?? g.gameDate,
+      date: formatEasternGameDate(g.gameDate),
       time: g.gameTimeET,
       timeET: `${g.gameTimeET} ET`,
       status: g.status === 'scheduled' ? 'scheduled' : g.status,
@@ -976,11 +1114,13 @@ export async function fetchLiveMLBData(targetDate?: string): Promise<LiveMLBData
         ]);
         const batterId = String(b.id);
         const sc = statcastMap[batterId];
+        const pitchMixProfile = pitchMixDataset.battersById[batterId];
 
         batters[batterId] = {
           id: batterId,
           name: b.fullName,
           teamId: b.teamId,
+          gameId: String(b.gamePk),
           position: b.position,
           bats: b.batSide,
           lineupSpot: b.lineupSpot > 0 ? b.lineupSpot : null,
@@ -1029,11 +1169,24 @@ export async function fetchLiveMLBData(targetDate?: string): Promise<LiveMLBData
           last14: { avg: 0, hr: recentForm.last14HR, ops: recentForm.last14OPS },
           last30: { avg: 0, hr: recentForm.last30HR, ops: recentForm.last30OPS },
           recentGameLog: [],
-          pitchTypeSkill: {},
+          pitchTypeSkill: pitchMixProfile?.pitchTypeSkill ?? {},
         };
       })
     );
   }
 
-  return { batters, pitchers, games, ballparks, teams };
+  return {
+    batters,
+    pitchers,
+    games,
+    ballparks,
+    teams,
+    weatherDiagnostics: {
+      historicalRequested: weatherDiagnostics.historicalRequested,
+      historicalSuccess: weatherDiagnostics.historicalSuccess,
+      historicalFallbacks: weatherDiagnostics.historicalFallbacks,
+      historicalAuthFailures: weatherDiagnostics.historicalAuthFailures,
+      failureReasons: Array.from(weatherDiagnostics.failureReasons),
+    },
+  };
 }

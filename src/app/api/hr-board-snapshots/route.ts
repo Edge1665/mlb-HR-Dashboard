@@ -3,6 +3,7 @@ import {
   fetchBoardSnapshotDetails,
   fetchBoardSnapshotHistory,
   fetchBoardSnapshotValidationData,
+  saveCustomBoardSnapshot,
   saveOfficialBoardSnapshot,
   softDeleteBoardSnapshot,
   scoreBoardSnapshotsForDate,
@@ -78,6 +79,91 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, ...result });
     }
 
+    if (action === 'save_dashboard_snapshot') {
+      if (typeof body?.targetDate !== 'string') {
+        return NextResponse.json(
+          { ok: false, error: 'targetDate is required.' },
+          { status: 400 }
+        );
+      }
+
+      if (!Array.isArray(body?.rows)) {
+        return NextResponse.json(
+          { ok: false, error: 'rows array is required.' },
+          { status: 400 }
+        );
+      }
+
+      const sortMode =
+        body?.sortMode === 'edge'
+          ? 'edge'
+          : body?.sortMode === 'best'
+            ? 'best'
+            : 'model';
+      const lineupMode =
+        body?.lineupMode === 'confirmed'
+          ? 'confirmed'
+          : body?.lineupMode === 'all'
+            ? 'all'
+            : undefined;
+
+      if (!lineupMode) {
+        return NextResponse.json(
+          { ok: false, error: 'lineupMode is required.' },
+          { status: 400 }
+        );
+      }
+
+      const snapshotType = body?.snapshotType === 'full' ? 'full' : 'filtered';
+      const filteringApplied =
+        typeof body?.filteringApplied === 'boolean'
+          ? body.filteringApplied
+          : snapshotType === 'filtered';
+      const snapshotKind =
+        body?.snapshotKind === 'dashboard_full_model'
+          ? 'dashboard_full_model'
+          : 'dashboard_filtered';
+
+      const result = await saveCustomBoardSnapshot({
+        targetDate: body.targetDate,
+        sortMode,
+        lineupMode,
+        snapshotKind,
+        snapshotType,
+        filteringApplied,
+        rows: body.rows,
+        generatedAt:
+          typeof body?.generatedAt === 'string' ? body.generatedAt : undefined,
+        trainingStartDate:
+          typeof body?.trainingStartDate === 'string'
+            ? body.trainingStartDate
+            : undefined,
+        trainingExampleCount:
+          typeof body?.trainingExampleCount === 'number' &&
+          Number.isFinite(body.trainingExampleCount)
+            ? body.trainingExampleCount
+            : undefined,
+        modelTrainedAt:
+          typeof body?.modelTrainedAt === 'string' ? body.modelTrainedAt : undefined,
+        diagnostics:
+          body?.diagnostics && typeof body.diagnostics === 'object'
+            ? body.diagnostics
+            : undefined,
+      });
+
+      console.info('[hr-board-snapshots] Saved dashboard snapshot via API', {
+        snapshotType,
+        rowCount: body.rows.length,
+        filteringApplied,
+        snapshotKind,
+        boardType: sortMode,
+        lineupMode,
+        targetDate: body.targetDate,
+      });
+
+      return NextResponse.json({ ok: true, ...result });
+    }
+
     if (typeof body?.targetDate !== 'string') {
       return NextResponse.json(
         { ok: false, error: 'targetDate is required.' },
@@ -110,6 +196,7 @@ export async function POST(request: Request) {
       targetDate: body.targetDate,
       sortMode,
       lineupMode,
+      snapshotType: body?.snapshotType === 'full' ? 'full' : 'filtered',
       limit,
       trainingStartDate,
     });

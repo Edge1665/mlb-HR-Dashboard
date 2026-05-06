@@ -1,0 +1,41 @@
+
+> mlbanalytics@0.1.0 dev
+> next dev -p 4028
+
+   ▲ Next.js 15.1.11
+   - Local:        http://localhost:4028
+   - Network:      http://192.168.2.10:4028
+   - Environments: .env.local
+
+ ✓ Starting...
+ ✓ Ready in 1939ms
+ ○ Compiling /hr-history ...
+ ✓ Compiled /hr-history in 4s (2022 modules)
+ ✓ Compiled in 872ms (1006 modules)
+ GET /hr-history 200 in 4875ms
+ ○ Compiling /api/hr-board-snapshots ...
+ ✓ Compiled /api/hr-board-snapshots in 996ms (2100 modules)
+ GET /api/hr-board-snapshots?view=validation 200 in 1770ms
+ GET /api/hr-board-snapshots?view=validation&date=2026-05-05 200 in 728ms
+ GET /api/hr-board-snapshots?snapshotId=44ace269-c36f-473b-9cdb-14d77a5a0964 200 in 728ms
+ GET /hr-history 200 in 306ms
+ GET /hr-history 200 in 41ms
+ GET /api/hr-board-snapshots?view=validation 200 in 658ms
+ ✓ Compiled in 1872ms (2114 modules)
+ GET /hr-history 200 in 86ms
+ GET /api/hr-board-snapshots?view=validation 200 in 334ms
+ GET /hr-history 200 in 213ms
+ GET /hr-history 200 in 43ms
+ GET /api/hr-board-snapshots?view=validation 200 in 367ms
+ ✓ Compiled in 1276ms (2023 modules)
+ GET /hr-history 200 in 113ms
+ ✓ Compiled /api/hr-board-snapshots in 182ms (1107 modules)
+ GET /api/hr-board-snapshots?view=validation 200 in 717ms
+ GET /api/hr-board-snapshots?view=validation&date=2026-05-05 200 in 283ms
+ GET /api/hr-board-snapshots?view=validation 200 in 186ms
+ ✓ Compiled in 448ms (1107 modules)
+ GET /hr-history 200 in 63ms
+ GET /api/hr-board-snapshots?view=validation 200 in 314ms
+ GET /api/hr-board-snapshots?view=validation 200 in 157ms
+ ✓ Compiled in 213ms (1107 modules)
+ GET /hr-history 200 in 55ms

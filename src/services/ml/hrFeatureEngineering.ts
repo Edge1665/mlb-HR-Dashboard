@@ -1,5 +1,6 @@
 import type { HRPredictionInput } from '@/services/hrPredictionService';
 import type { HRTrainingExample } from './types';
+import { PITCH_GROUPS, type PitchGroup } from '@/services/pitchMixTaxonomy';
 
 const HR_MODEL_CORE_FEATURES = [
   'seasonHRPerGame',
@@ -96,6 +97,25 @@ export const HR_MODEL_FEATURES_PARK_ONLY_SAFE_V1: readonly HRModelFeatureName[] 
   'estimatedHrParksForTypical400FtFly',
 ];
 
+export const HR_MODEL_FEATURES_PARK_WEATHER_SAFE_V1: readonly HRModelFeatureName[] = [
+  ...HR_MODEL_FEATURES_PARK_ONLY_SAFE_V1,
+  'temperature',
+  'humidity',
+  'windSpeed',
+  'windOutToCenter',
+  'windInFromCenter',
+  'crosswind',
+  'airDensityProxy',
+  'densityAltitude',
+];
+
+export const HR_MODEL_FEATURES_PARK_WEATHER_PITCHMIX_SAFE_V1: readonly HRModelFeatureName[] = [
+  ...HR_MODEL_FEATURES_PARK_WEATHER_SAFE_V1,
+  'pitchMixMatchupScore',
+  'pitcherVulnerabilityVsHand',
+  'batterVsPitchMixPower',
+];
+
 export const HR_MODEL_FEATURES_ENV_MATCHUP_V1: readonly HRModelFeatureName[] = [
   ...HR_MODEL_FEATURES_V2_CLEAN,
   ...HR_MODEL_EXPERIMENTAL_FEATURES,
@@ -104,6 +124,8 @@ export const HR_MODEL_FEATURES_ENV_MATCHUP_V1: readonly HRModelFeatureName[] = [
 export const HR_MODEL_FEATURE_SET_REGISTRY = {
   production_default: HR_MODEL_FEATURES_PRODUCTION_DEFAULT,
   park_only_safe_v1: HR_MODEL_FEATURES_PARK_ONLY_SAFE_V1,
+  park_weather_safe_v1: HR_MODEL_FEATURES_PARK_WEATHER_SAFE_V1,
+  park_weather_pitchmix_safe_v1: HR_MODEL_FEATURES_PARK_WEATHER_PITCHMIX_SAFE_V1,
   env_matchup_v1: HR_MODEL_FEATURES_ENV_MATCHUP_V1,
 } as const satisfies Record<string, readonly HRModelFeatureName[]>;
 
@@ -172,24 +194,13 @@ function getPullDirectionSign(bats?: 'L' | 'R' | 'S'): number {
 }
 
 function getPitchMixWeightedSkill(
-  pitcherPitchMix?: Partial<Record<'FF' | 'SI' | 'FC' | 'SL' | 'CU' | 'CH' | 'FS' | 'KC', number>>,
-  batterPitchTypeSkill?: Partial<Record<'FF' | 'SI' | 'FC' | 'SL' | 'CU' | 'CH' | 'FS' | 'KC', number>>
+  pitcherPitchMix?: Partial<Record<PitchGroup, number>>,
+  batterPitchTypeSkill?: Partial<Record<PitchGroup, number>>
 ): { weightedSkill: number; knownUsage: number } {
-  const pitchTypes: Array<'FF' | 'SI' | 'FC' | 'SL' | 'CU' | 'CH' | 'FS' | 'KC'> = [
-    'FF',
-    'SI',
-    'FC',
-    'SL',
-    'CU',
-    'CH',
-    'FS',
-    'KC',
-  ];
-
   let weightedTotal = 0;
   let totalUsage = 0;
 
-  for (const pitchType of pitchTypes) {
+  for (const pitchType of PITCH_GROUPS) {
     const usage = pitcherPitchMix?.[pitchType];
     if (usage == null || !Number.isFinite(usage) || usage <= 0) continue;
     const skill = batterPitchTypeSkill?.[pitchType] ?? 0;

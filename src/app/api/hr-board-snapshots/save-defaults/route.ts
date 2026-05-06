@@ -14,16 +14,17 @@ function buildSnapshotNoteContent(params: {
   capturedAt: string;
   sportsbooks: string[];
   workflowLabel: string;
-  saved: Array<{
-    label: string;
-    boardType: 'model' | 'best';
-    snapshot: {
-      lineupMode: string;
-      snapshotKind: string;
-    };
-    rows: Array<{
-      rank: number;
-      batterName: string;
+    saved: Array<{
+      label: string;
+      boardType: 'model' | 'best';
+      snapshot: {
+        lineupMode: string;
+        snapshotKind: string;
+        snapshotType: string;
+      };
+      rows: Array<{
+        rank: number;
+        batterName: string;
     }>;
   }>;
 }) {
@@ -43,7 +44,7 @@ function buildSnapshotNoteContent(params: {
 
   for (const board of params.saved) {
     lines.push(
-      `${board.label} (${board.snapshot.snapshotKind})`
+      `${board.label} (${board.snapshot.snapshotKind}, ${board.snapshot.snapshotType})`
     );
 
     for (const row of board.rows) {
@@ -81,13 +82,13 @@ const DEFAULT_SNAPSHOT_CONFIGS: readonly SaveDefaultsBoardConfig[] = [
   {
     label: 'model_confirmed',
     boardType: 'model',
-    lineupMode: 'confirmed',
+    lineupMode: 'all',
     snapshotKind: 'pre_first_pitch',
   },
   {
     label: 'best_confirmed',
     boardType: 'best',
-    lineupMode: 'confirmed',
+    lineupMode: 'all',
     snapshotKind: 'pre_first_pitch',
   },
 ] as const;
@@ -155,6 +156,18 @@ export async function POST(request: Request) {
         };
       })
     );
+
+    console.info('[hr-board-snapshots/save-defaults] Saved default board snapshots', {
+      workflow,
+      targetDate,
+      saved: savedBoards.map((board) => ({
+        label: board.label,
+        boardType: board.boardType,
+        snapshotType: board.snapshot.snapshotType,
+        rowCount: board.rows.length,
+        filteringApplied: board.snapshot.filteringApplied,
+      })),
+    });
 
     const capturedAt = new Date().toISOString();
     const notesDirectory = path.join(process.cwd(), 'output', 'board-snapshot-notes');

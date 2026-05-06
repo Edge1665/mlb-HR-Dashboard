@@ -9,6 +9,7 @@ import {
   normalizeSeasonSampleWeights,
   type SeasonSampleWeights,
 } from '@/services/ml/hrSeasonWeights';
+import type { DailyBoardSortMode } from '@/services/hrDailyBoardService';
 
 function formatDateInTimeZone(date: Date, timeZone: string): string {
   const formatter = new Intl.DateTimeFormat('en-CA', {
@@ -72,7 +73,7 @@ export interface DailyRefreshResult {
     snapshotCount: number;
     scoredSnapshots: Array<{
       snapshotId: string;
-      boardType: 'model' | 'best' | 'edge';
+      boardType: DailyBoardSortMode;
       lineupMode: 'confirmed' | 'all';
       top5Hits: number;
       top10Hits: number;

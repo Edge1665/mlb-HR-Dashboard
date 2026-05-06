@@ -64,6 +64,13 @@ export async function POST(request: NextRequest) {
       saved: number;
       updated: number;
       positives: number;
+      weatherDiagnostics?: {
+        historicalRequested: number;
+        historicalSuccess: number;
+        historicalFallbacks: number;
+        historicalAuthFailures: number;
+        failureReasons: string[];
+      };
     }> = [];
 
     for (const date of dates) {
@@ -77,12 +84,22 @@ export async function POST(request: NextRequest) {
         saved: saveResult.savedCount,
         updated: syncResult.updatedCount,
         positives: syncResult.positiveCount,
+        weatherDiagnostics: saveResult.weatherDiagnostics,
       });
     }
+
+    const weatherFallbackDetected = results.some(
+      (result) => (result.weatherDiagnostics?.historicalFallbacks ?? 0) > 0
+    );
+    const historicalAuthFailureDetected = results.some(
+      (result) => (result.weatherDiagnostics?.historicalAuthFailures ?? 0) > 0
+    );
 
     return NextResponse.json({
       success: true,
       totalDays: dates.length,
+      weatherFallbackDetected,
+      historicalAuthFailureDetected,
       results,
     });
   } catch (error) {

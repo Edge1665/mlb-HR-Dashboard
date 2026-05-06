@@ -5,6 +5,7 @@ import { buildHRFeatureExample } from '@/services/ml/hrFeatureEngineering';
 import { fetchRecentBatterGameLogSummary } from '@/services/mlbPlayerGameLogService';
 import { fetchRecentPitcherFormSummary } from '@/services/mlbPitcherRecentFormService';
 import type { HRTrainingExample } from '@/services/ml/types';
+import type { HRModelFeatureName } from '@/services/ml/hrFeatureEngineering';
 
 type ParkOnlySnapshotFields = Pick<
   HRTrainingExample,
@@ -13,6 +14,55 @@ type ParkOnlySnapshotFields = Pick<
   | 'fenceDistanceIndex'
   | 'estimatedHrParksForTypical400FtFly'
 >;
+
+type WeatherSnapshotFields = Pick<
+  HRTrainingExample,
+  | 'temperature'
+  | 'humidity'
+  | 'windSpeed'
+  | 'windOutToCenter'
+  | 'windInFromCenter'
+  | 'crosswind'
+  | 'airDensityProxy'
+  | 'densityAltitude'
+>;
+
+const FEATURE_SNAPSHOT_COLUMN_MAP: Partial<Record<HRModelFeatureName, string>> = {
+  seasonHRPerGame: 'season_hr_per_game',
+  barrelRate: 'barrel_rate',
+  exitVelocityAvg: 'exit_velocity_avg',
+  iso: 'iso',
+  hardHitRate: 'hard_hit_rate',
+  xSlugging: 'x_slugging',
+  pitcherHr9: 'pitcher_hr9',
+  parkHrFactor: 'park_hr_factor',
+  projectedAtBats: 'projected_at_bats',
+  platoonEdge: 'platoon_edge',
+  last7HR: 'last7_hr',
+  last14HR: 'last14_hr',
+  last30HR: 'last30_hr',
+  recentHrTrend: 'recent_hr_trend',
+  recentPowerScore: 'recent_power_score',
+  pitcherRecentRisk: 'pitcher_recent_risk',
+  recentGamesWithHR: 'recent_games_with_hr',
+  multiHRGamesLast30: 'multi_hr_games_last30',
+  recentPitcherHr9: 'recent_pitcher_hr9',
+  parkHrFactorVsHand: 'park_hr_factor_vs_hand',
+  averageFenceDistance: 'average_fence_distance',
+  fenceDistanceIndex: 'fence_distance_index',
+  estimatedHrParksForTypical400FtFly: 'estimated_hr_parks_for_typical_400ft_fly',
+  temperature: 'temperature',
+  humidity: 'humidity',
+  windSpeed: 'wind_speed',
+  windOutToCenter: 'wind_out_to_center',
+  windInFromCenter: 'wind_in_from_center',
+  crosswind: 'crosswind',
+  airDensityProxy: 'air_density_proxy',
+  densityAltitude: 'density_altitude',
+  pitchMixMatchupScore: 'pitch_mix_matchup_score',
+  pitcherVulnerabilityVsHand: 'pitcher_vulnerability_vs_hand',
+  batterVsPitchMixPower: 'batter_vs_pitch_mix_power',
+};
 
 function getSupabase() {
   return createSupabaseClient(
@@ -53,6 +103,31 @@ function getParkOnlySnapshotFields(
     average_fence_distance: example.averageFenceDistance,
     fence_distance_index: example.fenceDistanceIndex,
     estimated_hr_parks_for_typical_400ft_fly: example.estimatedHrParksForTypical400FtFly,
+  };
+}
+
+function getWeatherSnapshotFields(
+  example: WeatherSnapshotFields
+): Record<
+  | 'temperature'
+  | 'humidity'
+  | 'wind_speed'
+  | 'wind_out_to_center'
+  | 'wind_in_from_center'
+  | 'crosswind'
+  | 'air_density_proxy'
+  | 'density_altitude',
+  number
+> {
+  return {
+    temperature: example.temperature,
+    humidity: example.humidity,
+    wind_speed: example.windSpeed,
+    wind_out_to_center: example.windOutToCenter,
+    wind_in_from_center: example.windInFromCenter,
+    crosswind: example.crosswind,
+    air_density_proxy: example.airDensityProxy,
+    density_altitude: example.densityAltitude,
   };
 }
 
@@ -152,6 +227,13 @@ async function mapWithConcurrency<TInput, TOutput>(
 export interface SaveSnapshotResult {
   success: boolean;
   savedCount: number;
+  weatherDiagnostics?: {
+    historicalRequested: number;
+    historicalSuccess: number;
+    historicalFallbacks: number;
+    historicalAuthFailures: number;
+    failureReasons: string[];
+  };
   error?: string;
 }
 
@@ -166,22 +248,26 @@ export async function saveSnapshotsForDate(date: string): Promise<SaveSnapshotRe
   const season = getSeasonFromDate(normalizedDate);
 
   try {
-    const { batters, pitchers, games, ballparks } = await fetchLiveMLBData(normalizedDate);
+    const { batters, pitchers, games, ballparks, weatherDiagnostics } =
+      await fetchLiveMLBData(normalizedDate);
     const batterList = Object.values(batters);
 
     if (batterList.length === 0) {
       return {
         success: true,
         savedCount: 0,
+        weatherDiagnostics,
       };
     }
 
     const rows = await mapWithConcurrency(batterList, 8, async (batter) => {
       if (!batter?.id || !batter?.teamId) return null;
 
-      const game = games.find(
-        (g) => g.awayTeamId === batter.teamId || g.homeTeamId === batter.teamId
-      );
+      const game =
+        games.find((g) => g.id === batter.gameId) ??
+        games.find(
+          (g) => g.awayTeamId === batter.teamId || g.homeTeamId === batter.teamId
+        );
       if (!game) return null;
 
       const isHome = game.homeTeamId === batter.teamId;
@@ -250,6 +336,7 @@ export async function saveSnapshotsForDate(date: string): Promise<SaveSnapshotRe
         park_hr_factor: baseExample.parkHrFactor,
         ...getParkOnlySnapshotFields(baseExample),
         weather_hr_impact_score: baseExample.weatherHrImpactScore,
+        ...getWeatherSnapshotFields(baseExample),
         projected_at_bats: baseExample.projectedAtBats,
         platoon_edge: baseExample.platoonEdge,
         team_hr_per_game: baseExample.teamHrPerGame,
@@ -266,6 +353,9 @@ export async function saveSnapshotsForDate(date: string): Promise<SaveSnapshotRe
         pitcher_recent_risk: baseExample.pitcherRecentRisk,
         platoon_power_interaction: baseExample.platoonPowerInteraction,
         environment_score: baseExample.environmentScore,
+        pitch_mix_matchup_score: baseExample.pitchMixMatchupScore,
+        pitcher_vulnerability_vs_hand: baseExample.pitcherVulnerabilityVsHand,
+        batter_vs_pitch_mix_power: baseExample.batterVsPitchMixPower,
 
         recent_games_with_hr: recentGamesWithHR,
         multi_hr_games_last30: multiHRGamesLast30,
@@ -294,6 +384,7 @@ export async function saveSnapshotsForDate(date: string): Promise<SaveSnapshotRe
     return {
       success: true,
       savedCount: validRows.length,
+      weatherDiagnostics,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown snapshot save error';
@@ -509,6 +600,66 @@ export async function fetchTrainingExamplesFromSnapshots(filters?: {
   }
 
   return examples;
+}
+
+export async function validateTrainingSnapshotReadiness(filters: {
+  startDate?: string;
+  endDate?: string;
+  featureNames: readonly HRModelFeatureName[];
+}): Promise<{
+  checkedRows: number;
+  requiredColumns: string[];
+}> {
+  const requiredColumns = [...new Set(
+    filters.featureNames
+      .map((featureName) => FEATURE_SNAPSHOT_COLUMN_MAP[featureName])
+      .filter((value): value is string => Boolean(value))
+  )];
+
+  if (requiredColumns.length === 0) {
+    return {
+      checkedRows: 0,
+      requiredColumns: [],
+    };
+  }
+
+  const selectColumns = ['snapshot_date', 'batter_id', ...requiredColumns].join(', ');
+
+  let rows: Record<string, unknown>[];
+  try {
+    rows = await fetchAllSnapshotRows(selectColumns, {
+      startDate: filters.startDate,
+      endDate: filters.endDate,
+      labeledOnly: true,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown snapshot readiness error';
+    throw new Error(
+      `Retraining requires existing snapshot columns, but the snapshot validation query failed: ${message}`
+    );
+  }
+
+  const missingByColumn = requiredColumns
+    .map((columnName) => ({
+      columnName,
+      missingCount: rows.filter((row) => row[columnName] == null).length,
+    }))
+    .filter((entry) => entry.missingCount > 0);
+
+  if (missingByColumn.length > 0) {
+    const detail = missingByColumn
+      .map((entry) => `${entry.columnName} (${entry.missingCount} missing)`)
+      .join(', ');
+
+    throw new Error(
+      `Retraining is snapshot-only and will not rebuild missing data. Existing hr_feature_snapshots rows are missing required fields for the selected feature set: ${detail}. Run the appropriate snapshot backfill first, then retrain again.`
+    );
+  }
+
+  return {
+    checkedRows: rows.length,
+    requiredColumns,
+  };
 }
 
 export async function getTrainingSnapshotSummary(): Promise<{

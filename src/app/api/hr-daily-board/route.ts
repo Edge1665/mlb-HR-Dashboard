@@ -13,6 +13,7 @@ export async function GET(request: Request) {
     const trainingStartDate = url.searchParams.get('trainingStartDate') ?? undefined;
     const sortParam = url.searchParams.get('sort');
     const lineupModeParam = url.searchParams.get('lineupMode');
+    const includeFringeParam = url.searchParams.get('includeFringe');
     const sportsbooksParam = url.searchParams.get('sportsbooks');
     const seasonWeightsParam = url.searchParams.get('seasonWeights');
 
@@ -20,6 +21,10 @@ export async function GET(request: Request) {
     const sortMode =
       sortParam === 'edge'
         ? 'edge'
+        : sortParam === 'probability'
+          ? 'probability'
+          : sortParam === 'value'
+            ? 'value'
         : sortParam === 'best'
           ? 'best'
           : 'model';
@@ -35,6 +40,7 @@ export async function GET(request: Request) {
           .map((value) => value.trim())
           .filter(Boolean)
       : undefined;
+    const includeFringe = includeFringeParam === 'true';
     const seasonSampleWeights = parseSeasonSampleWeightsFromString(seasonWeightsParam);
 
     const result = await buildDailyHRBoard({
@@ -43,6 +49,7 @@ export async function GET(request: Request) {
       limit,
       sortMode,
       lineupMode,
+      includeFringe,
       sportsbooks,
       seasonSampleWeights,
     });

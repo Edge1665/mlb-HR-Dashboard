@@ -14,7 +14,10 @@ import {
   normalizeSeasonSampleWeights,
   type SeasonSampleWeights,
 } from '@/services/ml/hrSeasonWeights';
-import { fetchTrainingExamplesFromSnapshots } from '@/services/hrTrainingSnapshotService';
+import {
+  fetchTrainingExamplesFromSnapshots,
+  validateTrainingSnapshotReadiness,
+} from '@/services/hrTrainingSnapshotService';
 
 type CalibrationBucket = {
   rawMin: number;
@@ -108,6 +111,11 @@ export async function trainAndSaveHRModelArtifact(options?: {
   const seasonSampleWeights = normalizeSeasonSampleWeights(
     options?.seasonSampleWeights ?? DEFAULT_SEASON_SAMPLE_WEIGHTS
   );
+  await validateTrainingSnapshotReadiness({
+    startDate: trainingStartDate,
+    endDate: options?.trainingEndDate,
+    featureNames,
+  });
   const trainingExamples = await fetchTrainingExamplesFromSnapshots({
     startDate: trainingStartDate,
     endDate: options?.trainingEndDate,

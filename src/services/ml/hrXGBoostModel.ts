@@ -330,6 +330,7 @@ export function predictHRXGBoostProbabilityDetails(
   conservativeShrinkage = DEFAULT_CONSERVATIVE_SHRINKAGE,
   featureNames: readonly HRModelFeatureName[] = DEFAULT_PRODUCTION_HR_XGBOOST_FEATURE_SET
 ): {
+  rawModelProbability: number;
   rawCalibratedProbability: number;
   conservativeProbability: number;
 } {
@@ -350,6 +351,7 @@ export function predictHRXGBoostProbabilityDetails(
   );
 
   return {
+    rawModelProbability: rankedPrediction,
     rawCalibratedProbability: calibratedPrediction,
     conservativeProbability,
   };

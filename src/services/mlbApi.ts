@@ -22,6 +22,24 @@ function normalizeScheduleDate(date?: string): string {
   return date.slice(0, 10);
 }
 
+function formatEasternScheduleDate(dateTimeUTC?: string | null): string | null {
+  if (!dateTimeUTC) return null;
+
+  try {
+    const parsed = new Date(dateTimeUTC);
+    if (isNaN(parsed.getTime())) return null;
+
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/New_York',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(parsed);
+  } catch {
+    return null;
+  }
+}
+
 function formatGameTime(dateTimeUTC: string | undefined | null): string {
   if (!dateTimeUTC) return 'TBD';
   try {
@@ -120,6 +138,11 @@ export async function fetchTodaysMLBSchedule(date?: string): Promise<RealMLBGame
   for (const dateEntry of data?.dates ?? []) {
     for (const g of dateEntry?.games ?? []) {
       try {
+        const gameDateEt = formatEasternScheduleDate(g.gameDate);
+        if (gameDateEt && gameDateEt !== normalizedDate) {
+          continue;
+        }
+
         const away = g.teams?.away;
         const home = g.teams?.home;
         if (!away || !home) continue;

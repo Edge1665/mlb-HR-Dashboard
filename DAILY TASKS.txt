@@ -9,6 +9,7 @@ npm run hr:daily-refresh
 THEN NAVIGATE TO:
 http://localhost:4028/hr-daily-board
 http://localhost:4028/hr-daily-board?sort=best
+http://localhost:4028/home-run-dashboard
 
 
 

@@ -71,6 +71,11 @@ export interface PlayerSplitStats {
 export interface TodaysMatchup {
   gamePk: number;
   gameTimeET: string;
+  awayTeamName: string;
+  awayTeamAbbr: string;
+  homeTeamName: string;
+  homeTeamAbbr: string;
+  matchupLabel: string;
   opponentTeamName: string;
   opponentTeamAbbr: string;
   isHome: boolean;
@@ -406,6 +411,11 @@ export async function getTodaysMatchup(playerId: number, teamId: number): Promis
     return {
       gamePk: game.gamePk,
       gameTimeET: formatGameTime(game.gameDate),
+      awayTeamName: awayTeam?.team?.name ?? 'Unknown',
+      awayTeamAbbr: awayTeam?.team?.abbreviation ?? '???',
+      homeTeamName: homeTeam?.team?.name ?? 'Unknown',
+      homeTeamAbbr: homeTeam?.team?.abbreviation ?? '???',
+      matchupLabel: `${awayTeam?.team?.abbreviation ?? '???'} @ ${homeTeam?.team?.abbreviation ?? '???'}`,
       opponentTeamName: opponentSide?.team?.name ?? 'Unknown',
       opponentTeamAbbr: opponentSide?.team?.abbreviation ?? '???',
       isHome,

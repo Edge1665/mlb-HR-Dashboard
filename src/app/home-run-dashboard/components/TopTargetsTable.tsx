@@ -8,6 +8,7 @@ import {
   getPlatoonColor, formatAvg, getBarrelRateColor, getExitVeloColor,
   getParkFactorColor
 } from '@/lib/hrProjectionEngine';
+import { formatAwayHomeMatchup } from '@/services/gamePresentation';
 
 interface TopTargetsTableProps {
   projections: HRProjection[];
@@ -113,6 +114,7 @@ export default function TopTargetsTable({ projections, batters, pitchers, games,
                 ? (game.awayTeamId === batter?.teamId ? game.homeTeamId : game.awayTeamId)
                 : '';
               const oppTeam = teams[oppTeamId ?? ''];
+              const matchupLabel = game ? formatAwayHomeMatchup(game.awayTeamId, game.homeTeamId) : null;
 
               if (!batter) return null;
 
@@ -140,7 +142,7 @@ export default function TopTargetsTable({ projections, batters, pitchers, games,
                           <p className="text-xs text-slate-300">vs {pitcher.name}</p>
                           <div className="flex items-center gap-1 mt-0.5">
                             <span className={`text-xs px-1 py-0.5 rounded ${pitcher.throws === 'L' ? 'bg-blue-400/10 text-blue-400' : 'bg-orange-400/10 text-orange-400'}`}>{pitcher.throws}HP</span>
-                            {oppTeam && <span className="text-xs text-slate-500">{oppTeam.abbreviation}</span>}
+                            {oppTeam && <span className="text-xs text-slate-500">{matchupLabel ?? oppTeam.abbreviation}</span>}
                           </div>
                         </>
                       ) : (

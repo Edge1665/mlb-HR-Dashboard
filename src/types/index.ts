@@ -1,5 +1,7 @@
 export type GameStatus = 'scheduled' | 'lineup_confirmed' | 'in_progress' | 'final' | 'delayed';
 
+import type { PitchGroup } from '@/services/pitchMixTaxonomy';
+
 export type ConfidenceTier = 'elite' | 'high' | 'medium' | 'low';
 
 export type PlatoonAdvantage = 'strong' | 'moderate' | 'neutral' | 'disadvantage';
@@ -68,7 +70,7 @@ export interface Pitcher {
     era: number;
     hr9: number;
   };
-  pitchMix?: Partial<Record<'FF' | 'SI' | 'FC' | 'SL' | 'CU' | 'CH' | 'FS' | 'KC', number>>;
+  pitchMix?: Partial<Record<PitchGroup, number>>;
   handednessHrAllowed?: {
     vsLeftHr9?: number;
     vsRightHr9?: number;
@@ -99,6 +101,7 @@ export interface Batter {
   id: string;
   name: string;
   teamId: string;
+  gameId?: string | null;
   position: string;
   bats: 'L' | 'R' | 'S';
   lineupSpot: number | null;
@@ -121,7 +124,7 @@ export interface Batter {
   last14: { avg: number; hr: number; ops: number };
   last30: { avg: number; hr: number; ops: number };
   recentGameLog: GameLogEntry[];
-  pitchTypeSkill?: Partial<Record<'FF' | 'SI' | 'FC' | 'SL' | 'CU' | 'CH' | 'FS' | 'KC', number>>;
+  pitchTypeSkill?: Partial<Record<PitchGroup, number>>;
 }
 
 export interface GameLogEntry {

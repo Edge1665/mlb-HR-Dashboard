@@ -64,7 +64,6 @@ export default function RealMatchupPanel({ playerId, teamId, playerName }: RealM
   }
 
   const pitcher = matchup.probablePitcher;
-  const gameLabel = matchup.isHome ? `vs ${matchup.opponentTeamAbbr}` : `@ ${matchup.opponentTeamAbbr}`;
 
   return (
     <div className="card-base rounded-xl overflow-hidden">
@@ -74,7 +73,7 @@ export default function RealMatchupPanel({ playerId, teamId, playerName }: RealM
           <p className="text-xs text-slate-500 mt-0.5">{playerName}</p>
         </div>
         <span className="text-xs font-semibold text-brand-300 bg-brand-500/10 border border-brand-500/20 px-2 py-0.5 rounded-md">
-          {gameLabel}
+          {matchup.matchupLabel}
         </span>
       </div>
 
@@ -84,9 +83,11 @@ export default function RealMatchupPanel({ playerId, teamId, playerName }: RealM
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-bold text-slate-100">
-                {matchup.isHome ? 'Home' : 'Away'} vs {matchup.opponentTeamName}
+                {matchup.matchupLabel}
               </p>
-              <p className="text-xs text-slate-500 mt-0.5">{matchup.venueName}</p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {matchup.venueName} · {matchup.isHome ? "Home" : "Away"} side for {playerName}
+              </p>
             </div>
             <div className="text-right">
               <p className="text-sm font-bold font-mono-stat text-brand-300">{matchup.gameTimeET}</p>
