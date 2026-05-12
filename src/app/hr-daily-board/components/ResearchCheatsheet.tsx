@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { formatProbabilityPercent } from "@/services/hrChanceDisplay";
+import { formatProbabilityPercent, HR_CHANCE_LABEL } from "@/services/hrChanceDisplay";
 
 type TrendFlag = {
   key: string;
@@ -17,6 +17,7 @@ type CheatsheetRow = {
   gameTime: string | null;
   sportsbookOddsAmerican: number | null;
   modelScore: number;
+  displayedHrProbability?: number | null;
   researchScores: {
     hrResearchScore: number;
   };
@@ -104,10 +105,10 @@ export default function ResearchCheatsheet({
 
             <div>
               <p className="text-[11px] uppercase tracking-wide text-slate-500">
-                Model
+                {HR_CHANCE_LABEL}
               </p>
               <p className="mt-1 text-lg font-semibold text-slate-100">
-                {formatProbabilityPercent(row.modelScore)}
+                {formatProbabilityPercent(row.displayedHrProbability)}
               </p>
             </div>
 

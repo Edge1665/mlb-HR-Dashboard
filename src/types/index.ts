@@ -167,10 +167,21 @@ export interface Game {
   awayTeamId: string;
   homeTeamId: string;
   ballparkId: string;
+  venueId?: string;
+  venueName?: string | null;
   awayPitcherId: string;
   homePitcherId: string;
   tvNetwork: string;
   weather: Weather;
+  weatherSource?: {
+    lookupType: 'venueId' | 'venueName' | 'homeTeamId' | 'unknown';
+    locationKey: string | null;
+    locationName: string | null;
+    lat: number | null;
+    lon: number | null;
+    source: 'current' | 'forecast' | 'historical' | 'fallback';
+    warnings?: string[];
+  };
   lineupStatus: {
     away: 'confirmed' | 'projected' | 'unknown';
     home: 'confirmed' | 'projected' | 'unknown';

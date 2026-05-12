@@ -2,7 +2,7 @@
 
 import React from "react";
 import { X } from "lucide-react";
-import { formatProbabilityPercent } from "@/services/hrChanceDisplay";
+import { formatProbabilityPercent, HR_CHANCE_LABEL } from "@/services/hrChanceDisplay";
 import { PITCH_GROUP_DISPLAY_NAMES } from "@/services/pitchMixTaxonomy";
 
 type TrendFlag = {
@@ -17,6 +17,7 @@ type ResearchRow = {
   matchupLabel: string;
   gameTime: string | null;
   modelScore: number;
+  displayedHrProbability?: number | null;
   sportsbookOddsAmerican: number | null;
   impliedProbability: number | null;
   researchScores: {
@@ -202,6 +203,9 @@ export default function ResearchSidePanel({
                 ? ` | Batting ${row.research.battingOrder}`
                 : ""}
               {` | ${row.research.homeAway}`}
+            </p>
+            <p className="mt-2 text-xs font-medium uppercase tracking-wide text-emerald-300">
+              {HR_CHANCE_LABEL} {formatProbabilityPercent(row.displayedHrProbability)}
             </p>
           </div>
 

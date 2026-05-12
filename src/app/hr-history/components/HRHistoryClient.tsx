@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import {
   formatProbabilityPercent,
+  getDisplayedHrProbability,
   HR_CHANCE_INFO_TEXT,
   HR_CHANCE_LABEL,
 } from '@/services/hrChanceDisplay';
@@ -45,6 +46,7 @@ type SnapshotRow = {
   teamId: string;
   opponentTeamId: string;
   gameId: string;
+  displayedHrProbability?: number | null;
   predictedProbability: number;
   tier: string;
   sportsbookOddsAmerican: number | null;
@@ -448,7 +450,7 @@ export default function HRHistoryClient() {
                               </p>
                             </td>
                             <td className="px-4 py-3 font-semibold text-slate-100">
-                              {formatProbabilityPercent(row.predictedProbability)}
+                              {formatProbabilityPercent(getDisplayedHrProbability(row))}
                             </td>
                             <td className="px-4 py-3 text-slate-300">
                               {row.edge == null ? '—' : formatEdgePercent(row.edge)}

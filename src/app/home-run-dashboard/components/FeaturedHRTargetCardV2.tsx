@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ArrowUpRight, CloudRain, Info, Thermometer, Wind } from "lucide-react";
 import {
   formatProbabilityPercent,
+  getDisplayedHrProbability,
   HR_CHANCE_LABEL,
 } from "@/services/hrChanceDisplay";
 import { getTeamAbbreviation } from "@/services/mlbTeamMetadata";
@@ -28,6 +29,8 @@ type FeaturedRow = {
   opposingPitcherName: string | null;
   opposingPitcherThrows: "L" | "R" | null;
   calibratedHrProbability: number;
+  modelScore: number;
+  displayedHrProbability?: number | null;
   predictedProbability: number;
   tier: string;
   hrTier:
@@ -143,9 +146,9 @@ function getValueTierClass(tier: FeaturedRow["valueTier"]): string {
 }
 
 function getProbabilityClass(value: number): string {
-  if (value >= 0.25) return "text-amber-300";
-  if (value >= 0.18) return "text-emerald-300";
-  if (value >= 0.12) return "text-blue-300";
+  if (value >= 0.15) return "text-amber-300";
+  if (value >= 0.1) return "text-emerald-300";
+  if (value >= 0.06) return "text-blue-300";
   return "text-slate-300";
 }
 
@@ -998,15 +1001,15 @@ export default function FeaturedHRTargetCardV2({
 
           <div className="shrink-0 text-right">
             <p
-              className={`text-3xl font-bold ${getProbabilityClass(row.predictedProbability)}`}
+              className={`text-3xl font-bold ${getProbabilityClass(getDisplayedHrProbability(row) ?? 0)}`}
             >
-              {formatProbabilityPercent(row.predictedProbability)}
+              {formatProbabilityPercent(getDisplayedHrProbability(row))}
             </p>
             <p className="mt-1 text-xs uppercase tracking-[0.2em] text-slate-500">
               {HR_CHANCE_LABEL}
             </p>
             <p className="mt-2 text-xs text-slate-400">
-              Cal {formatProbabilityPercent(row.calibratedHrProbability)} | Edge{" "}
+              Model score {row.modelScore.toFixed(3)} | Edge{" "}
               {row.modelEdge != null ? `${(row.modelEdge * 100).toFixed(1)}%` : "--"}
             </p>
             <p className="text-xs text-slate-500">

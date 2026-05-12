@@ -4,6 +4,11 @@ import {
   type DailyBoardLineupMode,
   type DailyBoardSortMode,
 } from '@/services/hrDailyBoardService';
+import {
+  getRealisticDisplayedHrProbability,
+  MAX_DISPLAYED_HR_PROBABILITY,
+  sanitizeDisplayedHrProbability,
+} from '@/services/hrChanceDisplay';
 import { fetchBatterOutcomesForDate } from '@/services/mlbHistoricalOutcomesService';
 
 function getSupabase() {
@@ -184,6 +189,7 @@ export interface SavedBoardSnapshotRow {
   hrTier?: string | null;
   rawModelProbability?: number | null;
   calibratedHrProbability?: number | null;
+  displayedHrProbability?: number | null;
   predictedProbability: number;
   tier: string;
   sportsbookOddsAmerican: number | null;
@@ -209,6 +215,7 @@ type SnapshotRowInput = {
   hrTier?: string | null;
   rawModelProbability?: number | null;
   calibratedHrProbability?: number | null;
+  displayedHrProbability?: number | null;
   predictedProbability: number;
   tier: string;
   sportsbookOddsAmerican: number | null;
@@ -267,6 +274,32 @@ function mapSnapshotSummary(row: Record<string, unknown>): SavedBoardSnapshotSum
 }
 
 function mapSnapshotRow(row: Record<string, unknown>): SavedBoardSnapshotRow {
+  const rawModelProbability =
+    row.raw_model_probability != null ? Number(row.raw_model_probability) : null;
+  const storedCalibratedProbability =
+    row.calibrated_hr_probability != null
+      ? Number(row.calibrated_hr_probability)
+      : null;
+  const storedDisplayedProbability =
+    row.predicted_probability != null ? Number(row.predicted_probability) : null;
+  const impliedProbability =
+    row.implied_probability != null ? Number(row.implied_probability) : null;
+  const realisticDisplayedProbability = getRealisticDisplayedHrProbability({
+    modelScore: storedCalibratedProbability ?? storedDisplayedProbability,
+    rawProbability: rawModelProbability,
+    oddsImpliedProbability: impliedProbability,
+  });
+  const displayedHrProbability =
+    storedDisplayedProbability != null &&
+    storedDisplayedProbability <= MAX_DISPLAYED_HR_PROBABILITY
+      ? sanitizeDisplayedHrProbability(storedDisplayedProbability)
+      : realisticDisplayedProbability;
+  const calibratedHrProbability =
+    storedCalibratedProbability != null &&
+    storedCalibratedProbability <= MAX_DISPLAYED_HR_PROBABILITY
+      ? sanitizeDisplayedHrProbability(storedCalibratedProbability)
+      : displayedHrProbability;
+
   return {
     rank: Number(row.rank),
     batterId: String(row.batter_id),
@@ -275,20 +308,26 @@ function mapSnapshotRow(row: Record<string, unknown>): SavedBoardSnapshotRow {
     opponentTeamId: String(row.opponent_team_id),
     gameId: String(row.game_id),
     hrTier: row.hr_tier ? String(row.hr_tier) : null,
-    rawModelProbability:
-      row.raw_model_probability != null ? Number(row.raw_model_probability) : null,
-    calibratedHrProbability:
-      row.calibrated_hr_probability != null
-        ? Number(row.calibrated_hr_probability)
-        : null,
-    predictedProbability: Number(row.predicted_probability),
+    rawModelProbability,
+    calibratedHrProbability,
+    displayedHrProbability,
+    predictedProbability: displayedHrProbability ?? realisticDisplayedProbability,
     tier: String(row.tier),
     sportsbookOddsAmerican:
       row.sportsbook_odds_american != null ? Number(row.sportsbook_odds_american) : null,
-    modelEdge: row.model_edge != null ? Number(row.model_edge) : null,
-    impliedProbability:
-      row.implied_probability != null ? Number(row.implied_probability) : null,
-    edge: row.edge != null ? Number(row.edge) : null,
+    modelEdge:
+      impliedProbability != null
+        ? calibratedHrProbability - impliedProbability
+        : row.model_edge != null
+          ? Number(row.model_edge)
+          : null,
+    impliedProbability,
+    edge:
+      impliedProbability != null
+        ? (displayedHrProbability ?? realisticDisplayedProbability) - impliedProbability
+        : row.edge != null
+          ? Number(row.edge)
+          : null,
     valueScore: row.value_score != null ? Number(row.value_score) : null,
     valueTier: row.value_tier ? String(row.value_tier) : null,
     combinedScore: row.combined_score != null ? Number(row.combined_score) : null,
@@ -492,7 +531,7 @@ export async function saveOfficialBoardSnapshot(options: {
     hr_tier: row.hrTier ?? null,
     raw_model_probability: row.rawModelProbability ?? null,
     calibrated_hr_probability: row.calibratedHrProbability ?? null,
-    predicted_probability: row.predictedProbability,
+    predicted_probability: row.displayedHrProbability ?? row.predictedProbability,
     tier: row.tier,
     sportsbook_odds_american: row.sportsbookOddsAmerican,
     model_edge: row.modelEdge ?? null,
@@ -526,7 +565,7 @@ export async function saveOfficialBoardSnapshot(options: {
           team_id: row.teamId,
           opponent_team_id: row.opponentTeamId,
           game_id: row.gameId,
-          predicted_probability: row.predictedProbability,
+          predicted_probability: row.displayedHrProbability ?? row.predictedProbability,
           tier: row.tier,
           sportsbook_odds_american: row.sportsbookOddsAmerican,
           implied_probability: row.impliedProbability,
@@ -693,7 +732,7 @@ export async function saveCustomBoardSnapshot(options: {
     hr_tier: row.hrTier ?? null,
     raw_model_probability: row.rawModelProbability ?? null,
     calibrated_hr_probability: row.calibratedHrProbability ?? null,
-    predicted_probability: row.predictedProbability,
+    predicted_probability: row.displayedHrProbability ?? row.predictedProbability,
     tier: row.tier,
     sportsbook_odds_american: row.sportsbookOddsAmerican,
     model_edge: row.modelEdge ?? null,
@@ -727,7 +766,7 @@ export async function saveCustomBoardSnapshot(options: {
           team_id: row.teamId,
           opponent_team_id: row.opponentTeamId,
           game_id: row.gameId,
-          predicted_probability: row.predictedProbability,
+          predicted_probability: row.displayedHrProbability ?? row.predictedProbability,
           tier: row.tier,
           sportsbook_odds_american: row.sportsbookOddsAmerican,
           implied_probability: row.impliedProbability,

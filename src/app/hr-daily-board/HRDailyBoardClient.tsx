@@ -7,6 +7,8 @@ import ResearchCheatsheet from "@/app/hr-daily-board/components/ResearchCheatshe
 import ResearchSidePanel from "@/app/hr-daily-board/components/ResearchSidePanel";
 import {
   formatProbabilityPercent,
+  getDisplayedHrProbability,
+  getRealisticDisplayedHrProbability,
   HR_CHANCE_INFO_TEXT,
   HR_CHANCE_LABEL,
 } from "@/services/hrChanceDisplay";
@@ -30,6 +32,8 @@ type DailyBoardRow = {
   lineupConfirmed: boolean;
   rawModelProbability: number;
   calibratedHrProbability: number;
+  displayedHrProbability: number;
+  previousDisplayedProbability?: number;
   predictedProbability: number;
   modelScore: number;
   sportsbookOddsAmerican: number | null;
@@ -209,7 +213,7 @@ type CachedBoardPayload = {
   data: DailyBoardResponse;
 };
 
-const RAW_BOARD_CACHE_KEY_PREFIX = "hr-raw-board-cache-v6";
+const RAW_BOARD_CACHE_KEY_PREFIX = "hr-raw-board-cache-v7";
 
 function formatAmericanOdds(odds: number | null) {
   if (odds == null) return "--";
@@ -230,6 +234,22 @@ function formatCombinedScore(score: number | null) {
 function formatValueScore(score: number | null) {
   if (score == null) return "--";
   return score.toFixed(2);
+}
+
+function normalizeBoardRow(row: DailyBoardRow): DailyBoardRow {
+  const displayedHrProbability = getRealisticDisplayedHrProbability({
+    modelScore: row.modelScore,
+    rawProbability: row.rawModelProbability,
+  });
+
+  return {
+    ...row,
+    calibratedHrProbability: displayedHrProbability,
+    displayedHrProbability,
+    previousDisplayedProbability:
+      row.previousDisplayedProbability ?? row.displayedHrProbability,
+    predictedProbability: displayedHrProbability,
+  };
 }
 
 type DailyBoardRowWithResearch = DailyBoardRow & {
@@ -304,7 +324,16 @@ function readCachedBoard(
     if (!Array.isArray(parsed.data?.rows)) {
       return null;
     }
-    return parsed;
+    return {
+      ...parsed,
+      data: {
+        ...parsed.data,
+        rows: parsed.data.rows.map(normalizeBoardRow),
+        fullRows: Array.isArray(parsed.data.fullRows)
+          ? parsed.data.fullRows.map(normalizeBoardRow)
+          : [],
+      },
+    };
   } catch {
     return null;
   }
@@ -315,7 +344,16 @@ function writeCachedBoard(payload: CachedBoardPayload) {
 
   window.localStorage.setItem(
     buildCacheKey(payload.sort, payload.lineupMode, payload.sportsbooks),
-    JSON.stringify(payload),
+    JSON.stringify({
+      ...payload,
+      data: {
+        ...payload.data,
+        rows: payload.data.rows.map(normalizeBoardRow),
+        fullRows: Array.isArray(payload.data.fullRows)
+          ? payload.data.fullRows.map(normalizeBoardRow)
+          : [],
+      },
+    }),
   );
 }
 
@@ -606,11 +644,51 @@ export default function HRDailyBoardClient() {
           {formatProbabilityPercent(data.diagnostics.probabilitySummary.rawMax)}
         </p>
         <p className="mt-1">
-          Cal min/med/max {formatProbabilityPercent(data.diagnostics.probabilitySummary.calibratedMin)} /{" "}
+          {HR_CHANCE_LABEL} min/med/max {formatProbabilityPercent(data.diagnostics.probabilitySummary.calibratedMin)} /{" "}
           {formatProbabilityPercent(data.diagnostics.probabilitySummary.calibratedMedian)} /{" "}
           {formatProbabilityPercent(data.diagnostics.probabilitySummary.calibratedMax)}
         </p>
       </div>
+
+      <details className="rounded-xl border border-sky-500/20 bg-sky-500/5 px-4 py-3 text-xs text-slate-300">
+        <summary className="cursor-pointer text-sm font-medium text-sky-200">
+          Temporary HR % debug
+        </summary>
+        <p className="mt-2 text-slate-400">
+          The table below confirms the UI is reading <code>displayedHrProbability</code>,
+          not <code>modelScore</code>.
+        </p>
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full min-w-[920px] border-collapse">
+            <thead>
+              <tr className="border-b border-sky-500/20 text-left">
+                <th className="px-2 py-2">Player</th>
+                <th className="px-2 py-2">Model Score</th>
+                <th className="px-2 py-2">Raw Prob</th>
+                <th className="px-2 py-2">Prev Display</th>
+                <th className="px-2 py-2">Calibrated</th>
+                <th className="px-2 py-2">Displayed</th>
+                <th className="px-2 py-2">Implied</th>
+                <th className="px-2 py-2">UI Field</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.rows.slice(0, 10).map((row) => (
+                <tr key={`daily-debug-${row.batterId}`} className="border-b border-surface-400/40">
+                  <td className="px-2 py-2 font-medium text-slate-100">{row.batterName}</td>
+                  <td className="px-2 py-2">{row.modelScore.toFixed(3)}</td>
+                  <td className="px-2 py-2">{formatProbabilityPercent(row.rawModelProbability)}</td>
+                  <td className="px-2 py-2">{formatProbabilityPercent(row.previousDisplayedProbability)}</td>
+                  <td className="px-2 py-2">{formatProbabilityPercent(row.calibratedHrProbability)}</td>
+                  <td className="px-2 py-2">{formatProbabilityPercent(row.displayedHrProbability)}</td>
+                  <td className="px-2 py-2">{formatProbabilityPercent(row.impliedProbability)}</td>
+                  <td className="px-2 py-2 text-sky-200">displayedHrProbability</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
 
       <ResearchCheatsheet rows={cheatsheetRows} onOpenResearch={openResearch} />
 
@@ -625,7 +703,7 @@ export default function HRDailyBoardClient() {
               <th className="border p-2 text-left" title={HR_CHANCE_INFO_TEXT}>
                 {HR_CHANCE_LABEL}
               </th>
-              <th className="border p-2 text-left">Cal HR %</th>
+              <th className="border p-2 text-left">Model Score</th>
               <th className="border p-2 text-left">Odds</th>
               <th className="border p-2 text-left">Implied</th>
               <th className="border p-2 text-left">Edge</th>
@@ -661,10 +739,10 @@ export default function HRDailyBoardClient() {
                   {row.lineupConfirmed ? "Confirmed" : "Projected"}
                 </td>
                 <td className="border p-2">
-                  {formatProbabilityPercent(row.predictedProbability)}
+                  {formatProbabilityPercent(getDisplayedHrProbability(row))}
                 </td>
                 <td className="border p-2">
-                  {formatProbabilityPercent(row.calibratedHrProbability)}
+                  {row.modelScore.toFixed(3)}
                 </td>
                 <td className="border p-2">
                   {formatAmericanOdds(row.sportsbookOddsAmerican)}

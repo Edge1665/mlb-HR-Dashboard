@@ -8,7 +8,7 @@ import type { Batter, Pitcher, Game, Ballpark, Team, Weather } from '@/types';
 import { fetchTodaysMLBSchedule, type RealMLBGame } from './mlbApi';
 import { fetchGameLineup } from './lineupService';
 import {
-  fetchWeatherForTeamHomeParkAtDateDetailed,
+  fetchWeatherForVenueAtDateDetailed,
   getNeutralWeather,
 } from '@/services/weatherService';
 import { fetchSeasonPitchMixDataset } from '@/services/pitchMixDataService';
@@ -53,7 +53,7 @@ function formatEasternGameDate(value?: string): string {
 }
 
 function toGameWeather(
-  weather: Awaited<ReturnType<typeof fetchWeatherForTeamHomeParkAtDateDetailed>>['weather']
+  weather: Awaited<ReturnType<typeof fetchWeatherForVenueAtDateDetailed>>['weather']
 ): Weather {
   if (!weather) {
     return {
@@ -207,19 +207,29 @@ function normalizeVenueName(venueName: string): string {
   return venueName.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
 }
 
-function getParkData(venueId: number, venueName: string): { hrFactor: number; elevation: number; name: string } {
+function getParkData(venueId: number, venueName: string): {
+  hrFactor: number;
+  elevation: number;
+  name: string;
+  lookupSource: 'venue_name' | 'venue_id' | 'default';
+} {
   const officialVenue = venueName?.trim() || 'Unknown Venue';
   const byName = PARK_FACTORS_BY_VENUE_NAME[normalizeVenueName(officialVenue)];
   if (byName) {
-    return { ...byName, name: officialVenue };
+    return { ...byName, name: officialVenue, lookupSource: 'venue_name' };
   }
 
   const byId = PARK_FACTORS[venueId];
   if (byId) {
-    return { hrFactor: byId.hrFactor, elevation: byId.elevation, name: officialVenue };
+    return {
+      hrFactor: byId.hrFactor,
+      elevation: byId.elevation,
+      name: officialVenue,
+      lookupSource: 'venue_id',
+    };
   }
 
-  return { hrFactor: 1.0, elevation: 20, name: officialVenue };
+  return { hrFactor: 1.0, elevation: 20, name: officialVenue, lookupSource: 'default' };
 }
 
 function getDefaultParkDimensions(venueId: number) {
@@ -840,6 +850,14 @@ export async function fetchLiveMLBData(targetDate?: string): Promise<LiveMLBData
     const parkId = String(g.venueId);
     if (!ballparks[parkId]) {
       const park = getParkData(g.venueId, g.venueName);
+      if (park.lookupSource === 'default') {
+        console.warn('[park-factor] Falling back to neutral park factor', {
+          venueId: g.venueId,
+          venueName: g.venueName,
+          homeTeamId: g.homeTeamId,
+          awayTeamId: g.awayTeamId,
+        });
+      }
       const dimensions = getDefaultParkDimensions(g.venueId);
       const dimensionBundle = buildDimensionContext(dimensions, park.hrFactor, park.elevation);
       ballparks[parkId] = {
@@ -962,11 +980,46 @@ export async function fetchLiveMLBData(targetDate?: string): Promise<LiveMLBData
 
         const awayLineupConfirmed = lineup?.away?.status === 'confirmed';
     const homeLineupConfirmed = lineup?.home?.status === 'confirmed';
-    const weatherResult = await fetchWeatherForTeamHomeParkAtDateDetailed(
-      String(g.homeTeamId),
+    const weatherResult = await fetchWeatherForVenueAtDateDetailed(
+      {
+        homeTeamId: String(g.homeTeamId),
+        venueId: g.venueId,
+        venueName: g.venueName,
+      },
       g.gameDate
     );
     const liveWeather = weatherResult.weather;
+    if (
+      g.venueName &&
+      weatherResult.resolvedLocation?.locationName &&
+      normalizeVenueName(g.venueName) !==
+        normalizeVenueName(weatherResult.resolvedLocation.locationName)
+    ) {
+      console.warn('[weather] Resolved weather location does not match official venue', {
+        gamePk: g.gamePk,
+        homeTeamId: g.homeTeamId,
+        awayTeamId: g.awayTeamId,
+        venueId: g.venueId,
+        venueName: g.venueName,
+        resolvedLocation: weatherResult.resolvedLocation,
+        warnings: weatherResult.warnings ?? [],
+      });
+    }
+    if (
+      g.venueName &&
+      weatherResult.resolvedLocation?.locationName &&
+      weatherResult.resolvedLocation.lookupType !== 'venueId' &&
+      weatherResult.resolvedLocation.lookupType !== 'venueName'
+    ) {
+      console.warn('[weather] Venue-first weather lookup fell back from canonical venue', {
+        gamePk: g.gamePk,
+        homeTeamId: g.homeTeamId,
+        venueId: g.venueId,
+        venueName: g.venueName,
+        resolvedLocation: weatherResult.resolvedLocation,
+        warnings: weatherResult.warnings ?? [],
+      });
+    }
 
     if (!isTodayETDate(normalizedTargetDate)) {
       weatherDiagnostics.historicalRequested += 1;
@@ -984,14 +1037,18 @@ export async function fetchLiveMLBData(targetDate?: string): Promise<LiveMLBData
       }
     }
 
-    if (!liveWeather && !isTodayETDate(normalizedTargetDate)) {
-      console.warn('[weather:historical] Falling back to neutral weather', {
+    if (!liveWeather) {
+      console.warn('[weather] Falling back to neutral weather', {
         targetDate: normalizedTargetDate,
         gamePk: g.gamePk,
         gameDate: g.gameDate,
         homeTeamId: g.homeTeamId,
         venueId: g.venueId,
         venueName: g.venueName,
+        weatherSource: weatherResult.source,
+        failureReason: weatherResult.failureReason ?? null,
+        resolvedLocation: weatherResult.resolvedLocation ?? null,
+        warnings: weatherResult.warnings ?? [],
       });
     }
 
@@ -1004,10 +1061,21 @@ export async function fetchLiveMLBData(targetDate?: string): Promise<LiveMLBData
       awayTeamId: String(g.awayTeamId),
       homeTeamId: String(g.homeTeamId),
       ballparkId: parkId,
+      venueId: parkId,
+      venueName: g.venueName,
       awayPitcherId,
       homePitcherId,
       tvNetwork: g.broadcasts.join(' / ') || 'TBD',
       weather: toGameWeather(liveWeather ?? getNeutralWeather()),
+      weatherSource: {
+        lookupType: weatherResult.resolvedLocation?.lookupType ?? 'unknown',
+        locationKey: weatherResult.resolvedLocation?.locationKey ?? null,
+        locationName: weatherResult.resolvedLocation?.locationName ?? null,
+        lat: weatherResult.resolvedLocation?.lat ?? null,
+        lon: weatherResult.resolvedLocation?.lon ?? null,
+        source: weatherResult.source,
+        warnings: weatherResult.warnings ?? [],
+      },
       lineupStatus: {
         away: awayLineupConfirmed
           ? 'confirmed'

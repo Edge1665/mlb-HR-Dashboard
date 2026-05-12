@@ -1,4 +1,8 @@
-import { MLB_STADIUM_COORDINATES } from '@/services/mlbStadiumCoordinates';
+import {
+  MLB_STADIUM_COORDINATES_BY_TEAM_ID,
+  MLB_STADIUM_COORDINATES_BY_VENUE_ID,
+  type StadiumCoordinates,
+} from '@/services/mlbStadiumCoordinates';
 
 export interface LiveWeatherData {
   temp: number;
@@ -57,11 +61,21 @@ export interface HistoricalWeatherFetchResult {
   weather: LiveWeatherData | null;
   source: 'current' | 'forecast' | 'historical' | 'fallback';
   failureReason?: HistoricalWeatherFailureReason;
+  resolvedLocation?: {
+    lookupType: 'venueId' | 'venueName' | 'homeTeamId' | 'unknown';
+    locationKey: string | null;
+    locationName: string | null;
+    lat: number | null;
+    lon: number | null;
+  };
+  warnings?: string[];
 }
 
 export interface GameWeatherInput {
   gamePk: number;
   homeTeamId: number | string;
+  venueId?: number | string | null;
+  venueName?: string | null;
 }
 
 type OpenWeatherCurrentResponse = {
@@ -141,6 +155,122 @@ function degreesToCompass(deg: number): string {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function normalizeVenueName(value?: string | null): string {
+  return (value ?? '')
+    .toLowerCase()
+    .replace(/[^\w\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function buildVenueNameCoordinateMap(): Record<string, StadiumCoordinates> {
+  const entries = [
+    ...Object.values(MLB_STADIUM_COORDINATES_BY_VENUE_ID),
+    ...Object.values(MLB_STADIUM_COORDINATES_BY_TEAM_ID),
+  ];
+  const map: Record<string, StadiumCoordinates> = {};
+
+  for (const entry of entries) {
+    const normalized = normalizeVenueName(entry.name);
+    if (normalized) {
+      map[normalized] = entry;
+    }
+  }
+
+  return map;
+}
+
+const MLB_STADIUM_COORDINATES_BY_VENUE_NAME = buildVenueNameCoordinateMap();
+
+type StadiumLookupInput = {
+  homeTeamId?: string | number | null;
+  venueId?: string | number | null;
+  venueName?: string | null;
+};
+
+type ResolvedStadium = {
+  stadium: StadiumCoordinates | null;
+  lookupType: 'venueId' | 'venueName' | 'homeTeamId' | 'unknown';
+  locationKey: string | null;
+  warnings: string[];
+};
+
+function resolveStadiumCoordinates(input: StadiumLookupInput): ResolvedStadium {
+  const warnings: string[] = [];
+
+  const normalizedVenueName = normalizeVenueName(input.venueName);
+  const venueIdKey = input.venueId != null ? String(input.venueId) : null;
+  const byVenueName = normalizedVenueName
+    ? MLB_STADIUM_COORDINATES_BY_VENUE_NAME[normalizedVenueName] ?? null
+    : null;
+  const byVenueId = venueIdKey
+    ? MLB_STADIUM_COORDINATES_BY_VENUE_ID[venueIdKey] ?? null
+    : null;
+
+  if (
+    byVenueName &&
+    byVenueId &&
+    normalizeVenueName(byVenueName.name) !== normalizeVenueName(byVenueId.name)
+  ) {
+    warnings.push(
+      `venueId/venueName mismatch: venueId ${venueIdKey} -> ${byVenueId.name}, venueName -> ${byVenueName.name}`
+    );
+  }
+
+  if (byVenueName) {
+    if (byVenueId && normalizeVenueName(byVenueName.name) !== normalizeVenueName(byVenueId.name)) {
+      warnings.push(`preferring venueName mapping over venueId ${venueIdKey}`);
+    }
+
+    return {
+      stadium: byVenueName,
+      lookupType: 'venueName',
+      locationKey: normalizedVenueName,
+      warnings,
+    };
+  }
+
+  if (normalizedVenueName) {
+    warnings.push(`missing venueName mapping: ${input.venueName}`);
+  }
+
+  if (venueIdKey != null) {
+    if (byVenueId) {
+      return {
+        stadium: byVenueId,
+        lookupType: 'venueId',
+        locationKey: venueIdKey,
+        warnings,
+      };
+    }
+
+    warnings.push(`missing venueId mapping: ${venueIdKey}`);
+  }
+
+  if (input.homeTeamId != null) {
+    const homeTeamKey = String(input.homeTeamId);
+    const byHomeTeam = MLB_STADIUM_COORDINATES_BY_TEAM_ID[homeTeamKey];
+    if (byHomeTeam) {
+      warnings.push(`fell back to homeTeamId mapping: ${homeTeamKey}`);
+      return {
+        stadium: byHomeTeam,
+        lookupType: 'homeTeamId',
+        locationKey: homeTeamKey,
+        warnings,
+      };
+    }
+
+    warnings.push(`missing homeTeamId mapping: ${homeTeamKey}`);
+  }
+
+  return {
+    stadium: null,
+    lookupType: 'unknown',
+    locationKey: null,
+    warnings,
+  };
 }
 
 function normalizeDateString(value?: string): string {
@@ -333,7 +463,7 @@ function calculateHRImpactScore(input: {
 }
 
 function buildLiveWeatherData(input: {
-  teamId?: string;
+  stadium?: StadiumCoordinates | null;
   temp?: number;
   feelsLike?: number;
   humidity?: number;
@@ -350,10 +480,7 @@ function buildLiveWeatherData(input: {
   const windSpeed = input.windSpeed ?? 0;
   const windDeg = input.windDeg;
   const windDirection = typeof windDeg === 'number' ? degreesToCompass(windDeg) : 'N/A';
-  const centerFieldBearingDeg =
-    input.teamId != null
-      ? (MLB_STADIUM_COORDINATES[input.teamId]?.centerFieldBearingDeg ?? 25)
-      : 25;
+  const centerFieldBearingDeg = input.stadium?.centerFieldBearingDeg ?? 25;
   const windComponents = getWindVectorComponents(
     windDeg,
     windSpeed,
@@ -434,40 +561,73 @@ function pickClosestWeatherHour(
   }, null);
 }
 
-async function fetchWeatherForecastForTeamHomeParkAtDateDetailed(
-  teamId: string,
+async function fetchWeatherForecastForVenueAtDateDetailed(
+  location: StadiumLookupInput,
   targetDateTime: string,
 ): Promise<HistoricalWeatherFetchResult> {
   const apiKey = getWeatherApiKey();
+  const resolved = resolveStadiumCoordinates(location);
+  const stadium = resolved.stadium;
 
   if (!apiKey) {
     console.warn('[weather:forecast] Missing WeatherAPI key', {
-      teamId,
-      targetDateTime,
-    });
-    return { weather: null, source: 'fallback', failureReason: 'missing_api_key' };
-  }
-
-  const stadium = MLB_STADIUM_COORDINATES[teamId];
-  if (!stadium) {
-    console.warn('[weather:forecast] Missing stadium coordinates', {
-      teamId,
+      location,
       targetDateTime,
     });
     return {
       weather: null,
       source: 'fallback',
+      failureReason: 'missing_api_key',
+      resolvedLocation: {
+        lookupType: resolved.lookupType,
+        locationKey: resolved.locationKey,
+        locationName: stadium?.name ?? location.venueName ?? null,
+        lat: stadium?.lat ?? null,
+        lon: stadium?.lon ?? null,
+      },
+      warnings: resolved.warnings,
+    };
+  }
+  if (!stadium) {
+    console.warn('[weather:forecast] Missing stadium coordinates', {
+      location,
+      targetDateTime,
+      warnings: resolved.warnings,
+    });
+    return {
+      weather: null,
+      source: 'fallback',
       failureReason: 'missing_stadium_coordinates',
+      resolvedLocation: {
+        lookupType: resolved.lookupType,
+        locationKey: resolved.locationKey,
+        locationName: location.venueName ?? null,
+        lat: null,
+        lon: null,
+      },
+      warnings: resolved.warnings,
     };
   }
 
   const timestamp = getHistoricalWeatherTimestamp(targetDateTime);
   if (!timestamp) {
     console.warn('[weather:forecast] Invalid target timestamp', {
-      teamId,
+      location,
       targetDateTime,
     });
-    return { weather: null, source: 'fallback', failureReason: 'invalid_timestamp' };
+    return {
+      weather: null,
+      source: 'fallback',
+      failureReason: 'invalid_timestamp',
+      resolvedLocation: {
+        lookupType: resolved.lookupType,
+        locationKey: resolved.locationKey,
+        locationName: stadium.name,
+        lat: stadium.lat,
+        lon: stadium.lon,
+      },
+      warnings: resolved.warnings,
+    };
   }
 
   const queryDate = formatEtDateString(targetDateTime);
@@ -484,7 +644,7 @@ async function fetchWeatherForecastForTeamHomeParkAtDateDetailed(
 
   if (!response.ok) {
     console.warn('[weather:forecast] WeatherAPI forecast request failed', {
-      teamId,
+      location,
       targetDateTime,
       stadium: stadium.name,
       status: response.status,
@@ -497,6 +657,14 @@ async function fetchWeatherForecastForTeamHomeParkAtDateDetailed(
       weather: null,
       source: 'fallback',
       failureReason: response.status === 401 ? 'http_401' : 'http_error',
+      resolvedLocation: {
+        lookupType: resolved.lookupType,
+        locationKey: resolved.locationKey,
+        locationName: stadium.name,
+        lat: stadium.lat,
+        lon: stadium.lon,
+      },
+      warnings: resolved.warnings,
     };
   }
 
@@ -510,18 +678,30 @@ async function fetchWeatherForecastForTeamHomeParkAtDateDetailed(
 
   if (!sample) {
     console.warn('[weather:forecast] WeatherAPI forecast response missing sample', {
-      teamId,
+      location,
       targetDateTime,
       stadium: stadium.name,
       timestamp,
       queryDate,
       resultCount: forecastDays.length,
     });
-    return { weather: null, source: 'fallback', failureReason: 'missing_sample' };
+    return {
+      weather: null,
+      source: 'fallback',
+      failureReason: 'missing_sample',
+      resolvedLocation: {
+        lookupType: resolved.lookupType,
+        locationKey: resolved.locationKey,
+        locationName: stadium.name,
+        lat: stadium.lat,
+        lon: stadium.lon,
+      },
+      warnings: resolved.warnings,
+    };
   }
 
   const weather = buildLiveWeatherData({
-    teamId,
+    stadium,
     temp: sample.temp_f,
     feelsLike: sample.feelslike_f,
     humidity: sample.humidity,
@@ -533,7 +713,8 @@ async function fetchWeatherForecastForTeamHomeParkAtDateDetailed(
   });
 
   console.info('[weather:forecast] WeatherAPI forecast fetch succeeded', {
-    teamId,
+    location,
+    lookupType: resolved.lookupType,
     targetDateTime,
     stadium: stadium.name,
     timestamp,
@@ -547,18 +728,35 @@ async function fetchWeatherForecastForTeamHomeParkAtDateDetailed(
     crosswind: weather.crosswind,
   });
 
-  return { weather, source: 'forecast' };
+  return {
+    weather,
+    source: 'forecast',
+    resolvedLocation: {
+      lookupType: resolved.lookupType,
+      locationKey: resolved.locationKey,
+      locationName: stadium.name,
+      lat: stadium.lat,
+      lon: stadium.lon,
+    },
+    warnings: resolved.warnings,
+  };
 }
 
-export async function fetchWeatherForTeamHomePark(teamId: string): Promise<LiveWeatherData | null> {
+export async function fetchWeatherForVenue(
+  location: StadiumLookupInput,
+): Promise<LiveWeatherData | null> {
   const apiKey = getOpenWeatherApiKey();
+  const resolved = resolveStadiumCoordinates(location);
+  const stadium = resolved.stadium;
 
   if (!apiKey) {
     return null;
   }
-
-  const stadium = MLB_STADIUM_COORDINATES[teamId];
   if (!stadium) {
+    console.warn('[weather:current] Missing stadium coordinates', {
+      location,
+      warnings: resolved.warnings,
+    });
     return null;
   }
 
@@ -579,7 +777,7 @@ export async function fetchWeatherForTeamHomePark(teamId: string): Promise<LiveW
   const json = (await response.json()) as OpenWeatherCurrentResponse;
 
   return buildLiveWeatherData({
-    teamId,
+    stadium,
     temp: json.main?.temp,
     feelsLike: json.main?.feels_like,
     humidity: json.main?.humidity,
@@ -591,29 +789,40 @@ export async function fetchWeatherForTeamHomePark(teamId: string): Promise<LiveW
   });
 }
 
-export async function fetchWeatherForTeamHomeParkAtDateDetailed(
-  teamId: string,
+export async function fetchWeatherForVenueAtDateDetailed(
+  location: StadiumLookupInput,
   targetDateTime?: string
 ): Promise<HistoricalWeatherFetchResult> {
   if (!targetDateTime) {
+    const weather = await fetchWeatherForVenue(location);
+    const resolved = resolveStadiumCoordinates(location);
     return {
-      weather: await fetchWeatherForTeamHomePark(teamId),
+      weather,
       source: 'current',
+      resolvedLocation: {
+        lookupType: resolved.lookupType,
+        locationKey: resolved.locationKey,
+        locationName:
+          resolved.stadium?.name ?? location.venueName ?? null,
+        lat: resolved.stadium?.lat ?? null,
+        lon: resolved.stadium?.lon ?? null,
+      },
+      warnings: resolved.warnings,
     };
   }
 
   const targetDate = getTargetDateTime(targetDateTime);
   if (!targetDate) {
     console.warn('[weather] Invalid target timestamp', {
-      teamId,
+      location,
       targetDateTime,
     });
     return { weather: null, source: 'fallback', failureReason: 'invalid_timestamp' };
   }
 
   if (targetDate.getTime() > Date.now()) {
-    const forecastResult = await fetchWeatherForecastForTeamHomeParkAtDateDetailed(
-      teamId,
+    const forecastResult = await fetchWeatherForecastForVenueAtDateDetailed(
+      location,
       targetDateTime,
     );
 
@@ -623,8 +832,10 @@ export async function fetchWeatherForTeamHomeParkAtDateDetailed(
 
     if (isTodayETDate(targetDateTime)) {
       return {
-        weather: await fetchWeatherForTeamHomePark(teamId),
+        weather: await fetchWeatherForVenue(location),
         source: 'current',
+        resolvedLocation: forecastResult.resolvedLocation,
+        warnings: forecastResult.warnings,
       };
     }
 
@@ -632,31 +843,68 @@ export async function fetchWeatherForTeamHomeParkAtDateDetailed(
   }
 
   const apiKey = getWeatherApiKey();
+  const resolved = resolveStadiumCoordinates(location);
+  const stadium = resolved.stadium;
 
   if (!apiKey) {
     console.warn('[weather:historical] Missing WeatherAPI key', {
-      teamId,
+      location,
       targetDateTime,
     });
-    return { weather: null, source: 'fallback', failureReason: 'missing_api_key' };
+    return {
+      weather: null,
+      source: 'fallback',
+      failureReason: 'missing_api_key',
+      resolvedLocation: {
+        lookupType: resolved.lookupType,
+        locationKey: resolved.locationKey,
+        locationName: stadium?.name ?? location.venueName ?? null,
+        lat: stadium?.lat ?? null,
+        lon: stadium?.lon ?? null,
+      },
+      warnings: resolved.warnings,
+    };
   }
-
-  const stadium = MLB_STADIUM_COORDINATES[teamId];
   if (!stadium) {
     console.warn('[weather:historical] Missing stadium coordinates', {
-      teamId,
+      location,
       targetDateTime,
+      warnings: resolved.warnings,
     });
-    return { weather: null, source: 'fallback', failureReason: 'missing_stadium_coordinates' };
+    return {
+      weather: null,
+      source: 'fallback',
+      failureReason: 'missing_stadium_coordinates',
+      resolvedLocation: {
+        lookupType: resolved.lookupType,
+        locationKey: resolved.locationKey,
+        locationName: location.venueName ?? null,
+        lat: null,
+        lon: null,
+      },
+      warnings: resolved.warnings,
+    };
   }
 
   const timestamp = getHistoricalWeatherTimestamp(targetDateTime);
   if (!timestamp) {
     console.warn('[weather:historical] Invalid target timestamp', {
-      teamId,
+      location,
       targetDateTime,
     });
-    return { weather: null, source: 'fallback', failureReason: 'invalid_timestamp' };
+    return {
+      weather: null,
+      source: 'fallback',
+      failureReason: 'invalid_timestamp',
+      resolvedLocation: {
+        lookupType: resolved.lookupType,
+        locationKey: resolved.locationKey,
+        locationName: stadium.name,
+        lat: stadium.lat,
+        lon: stadium.lon,
+      },
+      warnings: resolved.warnings,
+    };
   }
 
   const queryDate = formatEtDateString(targetDateTime);
@@ -672,7 +920,7 @@ export async function fetchWeatherForTeamHomeParkAtDateDetailed(
 
   if (!response.ok) {
     console.warn('[weather:historical] WeatherAPI historical request failed', {
-      teamId,
+      location,
       targetDateTime,
       stadium: stadium.name,
       status: response.status,
@@ -685,6 +933,14 @@ export async function fetchWeatherForTeamHomeParkAtDateDetailed(
       weather: null,
       source: 'fallback',
       failureReason: response.status === 401 ? 'http_401' : 'http_error',
+      resolvedLocation: {
+        lookupType: resolved.lookupType,
+        locationKey: resolved.locationKey,
+        locationName: stadium.name,
+        lat: stadium.lat,
+        lon: stadium.lon,
+      },
+      warnings: resolved.warnings,
     };
   }
 
@@ -694,18 +950,30 @@ export async function fetchWeatherForTeamHomeParkAtDateDetailed(
 
   if (!sample) {
     console.warn('[weather:historical] WeatherAPI historical response missing sample', {
-      teamId,
+      location,
       targetDateTime,
       stadium: stadium.name,
       timestamp,
       queryDate,
       resultCount: hours.length,
     });
-    return { weather: null, source: 'fallback', failureReason: 'missing_sample' };
+    return {
+      weather: null,
+      source: 'fallback',
+      failureReason: 'missing_sample',
+      resolvedLocation: {
+        lookupType: resolved.lookupType,
+        locationKey: resolved.locationKey,
+        locationName: stadium.name,
+        lat: stadium.lat,
+        lon: stadium.lon,
+      },
+      warnings: resolved.warnings,
+    };
   }
 
   const weather = buildLiveWeatherData({
-    teamId,
+    stadium,
     temp: sample.temp_f,
     feelsLike: sample.feelslike_f,
     humidity: sample.humidity,
@@ -717,7 +985,8 @@ export async function fetchWeatherForTeamHomeParkAtDateDetailed(
   });
 
   console.info('[weather:historical] WeatherAPI historical fetch succeeded', {
-    teamId,
+    location,
+    lookupType: resolved.lookupType,
     targetDateTime,
     stadium: stadium.name,
     timestamp,
@@ -733,7 +1002,29 @@ export async function fetchWeatherForTeamHomeParkAtDateDetailed(
     densityAltitude: weather.densityAltitude,
   });
 
-  return { weather, source: 'historical' };
+  return {
+    weather,
+    source: 'historical',
+    resolvedLocation: {
+      lookupType: resolved.lookupType,
+      locationKey: resolved.locationKey,
+      locationName: stadium.name,
+      lat: stadium.lat,
+      lon: stadium.lon,
+    },
+    warnings: resolved.warnings,
+  };
+}
+
+export async function fetchWeatherForTeamHomePark(teamId: string): Promise<LiveWeatherData | null> {
+  return fetchWeatherForVenue({ homeTeamId: teamId });
+}
+
+export async function fetchWeatherForTeamHomeParkAtDateDetailed(
+  teamId: string,
+  targetDateTime?: string
+): Promise<HistoricalWeatherFetchResult> {
+  return fetchWeatherForVenueAtDateDetailed({ homeTeamId: teamId }, targetDateTime);
 }
 
 export async function fetchWeatherForTeamHomeParkAtDate(
@@ -776,7 +1067,11 @@ export async function fetchWeatherForAllGames(
 
   const results = await Promise.allSettled(
     inputs.map(async (input) => {
-      const weather = await fetchWeatherForTeamHomePark(String(input.homeTeamId));
+      const weather = await fetchWeatherForVenue({
+        homeTeamId: input.homeTeamId,
+        venueId: input.venueId,
+        venueName: input.venueName,
+      });
 
       return {
         gamePk: input.gamePk,

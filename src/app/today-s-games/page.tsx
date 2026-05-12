@@ -39,6 +39,8 @@ export default async function TodaysGamesPage() {
     const venueInputs = games.map(g => ({
       gamePk: g.gamePk,
       homeTeamId: g.homeTeamId,
+      venueId: g.venueId,
+      venueName: g.venueName,
     }));
 
     const [weatherResult, lineupResult] = await Promise.allSettled([

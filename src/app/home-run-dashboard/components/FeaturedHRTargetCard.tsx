@@ -2,7 +2,11 @@
 
 import Link from 'next/link';
 import { ArrowUpRight, CloudRain, Info, Thermometer, Wind } from 'lucide-react';
-import { formatProbabilityPercent, HR_CHANCE_LABEL } from '@/services/hrChanceDisplay';
+import {
+  formatProbabilityPercent,
+  getDisplayedHrProbability,
+  HR_CHANCE_LABEL,
+} from '@/services/hrChanceDisplay';
 import { getTeamAbbreviation } from '@/services/mlbTeamMetadata';
 
 type FeaturedRow = {
@@ -24,6 +28,7 @@ type FeaturedRow = {
   ballparkName: string | null;
   opposingPitcherName: string | null;
   opposingPitcherThrows: 'L' | 'R' | null;
+  displayedHrProbability?: number | null;
   predictedProbability: number;
   tier: string;
   lineupConfirmed: boolean;
@@ -68,9 +73,9 @@ function getTierClass(tier: string): string {
 }
 
 function getProbabilityClass(value: number): string {
-  if (value >= 0.25) return 'text-amber-300';
-  if (value >= 0.18) return 'text-emerald-300';
-  if (value >= 0.12) return 'text-blue-300';
+  if (value >= 0.15) return 'text-amber-300';
+  if (value >= 0.1) return 'text-emerald-300';
+  if (value >= 0.06) return 'text-blue-300';
   return 'text-slate-300';
 }
 
@@ -448,8 +453,8 @@ export default function FeaturedHRTargetCard({ row, researchHref }: FeaturedHRTa
           </div>
 
           <div className="text-right">
-            <p className={`text-3xl font-bold ${getProbabilityClass(row.predictedProbability)}`}>
-              {formatProbabilityPercent(row.predictedProbability)}
+            <p className={`text-3xl font-bold ${getProbabilityClass(getDisplayedHrProbability(row) ?? 0)}`}>
+              {formatProbabilityPercent(getDisplayedHrProbability(row))}
             </p>
             <p className="mt-1 text-xs uppercase tracking-[0.2em] text-slate-500">
               {HR_CHANCE_LABEL}

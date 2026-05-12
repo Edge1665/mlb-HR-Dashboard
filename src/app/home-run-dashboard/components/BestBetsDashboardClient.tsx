@@ -17,6 +17,8 @@ import {
 import FeaturedHRTargetCardV2 from "@/app/home-run-dashboard/components/FeaturedHRTargetCardV2";
 import {
   formatProbabilityPercent,
+  getDisplayedHrProbability,
+  getRealisticDisplayedHrProbability,
   HR_CHANCE_INFO_TEXT,
   HR_CHANCE_LABEL,
 } from "@/services/hrChanceDisplay";
@@ -55,6 +57,8 @@ type DailyBoardRow = {
   rawCalibratedProbability: number;
   conservativeProbability: number;
   calibratedHrProbability: number;
+  displayedHrProbability: number;
+  previousDisplayedProbability?: number;
   predictedProbability: number;
   tier: string;
   hrTier: HRTier;
@@ -227,7 +231,7 @@ type CachedDashboardPayload = {
   };
 };
 
-const DASHBOARD_CACHE_KEY_PREFIX = "hr-dashboard-cache-v8";
+const DASHBOARD_CACHE_KEY_PREFIX = "hr-dashboard-cache-v9";
 const MAX_CACHED_ROWS = 25;
 
 function normalizeRowMatchupLabel(row: DailyBoardRow): string {
@@ -257,12 +261,22 @@ function normalizeRowVenueName(row: DailyBoardRow): string | null {
 
 function normalizeBoardRow(row: DailyBoardRow): DailyBoardRow {
   const venueName = normalizeRowVenueName(row);
+  const displayedHrProbability = getRealisticDisplayedHrProbability({
+    modelScore: row.modelScore,
+    rawProbability: row.rawModelProbability,
+  });
+  const previousDisplayedProbability =
+    row.previousDisplayedProbability ?? row.displayedHrProbability;
 
   return {
     ...row,
     matchupLabel: normalizeRowMatchupLabel(row),
     venueName,
     ballparkName: venueName,
+    calibratedHrProbability: displayedHrProbability,
+    displayedHrProbability,
+    previousDisplayedProbability,
+    predictedProbability: displayedHrProbability,
   };
 }
 
@@ -580,9 +594,9 @@ function matchesTierFilter(
 }
 
 function getProbabilityClass(value: number): string {
-  if (value >= 0.25) return "text-amber-300";
-  if (value >= 0.18) return "text-emerald-300";
-  if (value >= 0.12) return "text-blue-300";
+  if (value >= 0.15) return "text-amber-300";
+  if (value >= 0.1) return "text-emerald-300";
+  if (value >= 0.06) return "text-blue-300";
   return "text-slate-300";
 }
 
@@ -950,7 +964,10 @@ export default function BestBetsDashboardClient() {
   const topRow = filteredRows[0] ?? rows[0] ?? null;
   const averageProbability =
     filteredRows.length > 0
-      ? filteredRows.reduce((sum, row) => sum + row.predictedProbability, 0) /
+      ? filteredRows.reduce(
+          (sum, row) => sum + (getDisplayedHrProbability(row) ?? 0),
+          0,
+        ) /
         filteredRows.length
       : 0;
   const positiveEdgeCount = filteredRows.filter(
@@ -1251,7 +1268,7 @@ export default function BestBetsDashboardClient() {
               </p>
               <p className="text-xs text-slate-400">
                 {topRow
-                  ? `${formatProbabilityPercent(topRow.predictedProbability)} ${HR_CHANCE_LABEL} | ${formatEdge(topRow.edge)} edge`
+                  ? `${formatProbabilityPercent(getDisplayedHrProbability(topRow))} ${HR_CHANCE_LABEL} | ${formatEdge(topRow.edge)} edge`
                   : "No row"}
               </p>
             </div>
@@ -1431,7 +1448,7 @@ export default function BestBetsDashboardClient() {
               {formatProbabilityPercent(data.diagnostics.probabilitySummary.rawMax)} min-med-max
             </p>
             <p className="text-xs text-slate-500">
-              Calibrated {formatProbabilityPercent(data.diagnostics.probabilitySummary.calibratedMin)} /{" "}
+              {HR_CHANCE_LABEL} {formatProbabilityPercent(data.diagnostics.probabilitySummary.calibratedMin)} /{" "}
               {formatProbabilityPercent(data.diagnostics.probabilitySummary.calibratedMedian)} /{" "}
               {formatProbabilityPercent(data.diagnostics.probabilitySummary.calibratedMax)} min-med-max
             </p>
@@ -1453,6 +1470,53 @@ export default function BestBetsDashboardClient() {
           </div>
         </div>
       </div>
+
+      <details className="rounded-xl border border-sky-500/20 bg-sky-500/5 px-4 py-3 text-sm text-slate-200">
+        <summary className="cursor-pointer font-medium text-sky-200">
+          Temporary HR % debug
+        </summary>
+        <p className="mt-2 text-xs text-slate-400">
+          UI cards and tables render <code>displayedHrProbability</code> through
+          <code> getDisplayedHrProbability()</code>. This table shows the top 10
+          rows after ranking, without changing sort order.
+        </p>
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full min-w-[920px] text-xs">
+            <thead>
+              <tr className="border-b border-sky-500/20 text-left text-slate-400">
+                <th className="px-2 py-2">Player</th>
+                <th className="px-2 py-2">Model Score</th>
+                <th className="px-2 py-2">Raw Prob</th>
+                <th className="px-2 py-2">Prev Display</th>
+                <th className="px-2 py-2">Calibrated</th>
+                <th className="px-2 py-2">Displayed</th>
+                <th className="px-2 py-2">Implied</th>
+                <th className="px-2 py-2">UI Field</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.slice(0, 10).map((row) => (
+                <tr key={`hr-debug-${row.batterId}`} className="border-b border-surface-400/40">
+                  <td className="px-2 py-2 font-medium text-slate-100">{row.batterName}</td>
+                  <td className="px-2 py-2">{row.modelScore.toFixed(3)}</td>
+                  <td className="px-2 py-2">{formatProbabilityPercent(row.rawModelProbability)}</td>
+                  <td className="px-2 py-2">{formatProbabilityPercent(row.previousDisplayedProbability)}</td>
+                  <td className="px-2 py-2">{formatProbabilityPercent(row.calibratedHrProbability)}</td>
+                  <td className="px-2 py-2">{formatProbabilityPercent(row.displayedHrProbability)}</td>
+                  <td className="px-2 py-2">{formatProbabilityPercent(row.impliedProbability)}</td>
+                  <td className="px-2 py-2 text-sky-200">
+                    {row.displayedHrProbability != null
+                      ? "displayedHrProbability"
+                      : row.predictedProbability != null
+                        ? "predictedProbability fallback"
+                        : "calibrated fallback"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
 
       <div className="rounded-2xl border border-surface-400 bg-surface-800 p-4 sm:p-5">
         <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
@@ -1611,9 +1675,9 @@ export default function BestBetsDashboardClient() {
                     </div>
                     <div className="text-right">
                       <p
-                        className={`text-sm font-semibold ${getProbabilityClass(row.predictedProbability)}`}
+                        className={`text-sm font-semibold ${getProbabilityClass(getDisplayedHrProbability(row) ?? 0)}`}
                       >
-                        {formatProbabilityPercent(row.predictedProbability)}
+                        {formatProbabilityPercent(getDisplayedHrProbability(row))}
                       </p>
                       <p
                         className={`text-[11px] ${shared ? "text-emerald-300" : "text-blue-300"}`}
@@ -1659,7 +1723,7 @@ export default function BestBetsDashboardClient() {
                         #{row.rank} {row.batterName}
                       </p>
                       <p className="text-xs text-slate-500">
-                        {formatProbabilityPercent(row.predictedProbability)}{" "}
+                        {formatProbabilityPercent(getDisplayedHrProbability(row))}{" "}
                         {HR_CHANCE_LABEL}
                         {row.edge != null
                           ? ` | ${formatEdge(row.edge)} edge`
@@ -1781,7 +1845,7 @@ export default function BestBetsDashboardClient() {
                 : mode === "model"
                   ? "Model Score"
                   : mode === "probability"
-                    ? "Calibrated HR %"
+                    ? HR_CHANCE_LABEL
                     : mode === "value"
                       ? "Value Score"
                       : "Edge"}
@@ -1949,9 +2013,9 @@ export default function BestBetsDashboardClient() {
                     {HR_CHANCE_LABEL}
                   </p>
                   <p
-                    className={`font-semibold ${getProbabilityClass(row.predictedProbability)}`}
+                    className={`font-semibold ${getProbabilityClass(getDisplayedHrProbability(row) ?? 0)}`}
                   >
-                    {formatProbabilityPercent(row.predictedProbability)}
+                    {formatProbabilityPercent(getDisplayedHrProbability(row))}
                   </p>
                 </div>
                 <div className="rounded-lg bg-surface-800 px-3 py-2">
@@ -1972,10 +2036,10 @@ export default function BestBetsDashboardClient() {
                 </div>
                 <div className="rounded-lg bg-surface-800 px-3 py-2">
                   <p className="text-[11px] uppercase tracking-wide text-slate-500">
-                    Cal HR %
+                    Model Score
                   </p>
                   <p className="font-semibold text-slate-100">
-                    {formatProbabilityPercent(row.calibratedHrProbability)}
+                    {row.modelScore.toFixed(3)}
                   </p>
                 </div>
               </div>
@@ -1993,7 +2057,7 @@ export default function BestBetsDashboardClient() {
                   {HR_CHANCE_LABEL}
                 </th>
                 <th className="px-4 py-3">Odds</th>
-                <th className="px-4 py-3">Cal HR %</th>
+                <th className="px-4 py-3">Model Score</th>
                 <th className="px-4 py-3">Edge</th>
                 <th className="px-4 py-3">Value Score</th>
                 <th className="px-4 py-3">Value Tier</th>
@@ -2027,15 +2091,15 @@ export default function BestBetsDashboardClient() {
                     </div>
                   </td>
                   <td
-                    className={`px-4 py-3 font-semibold ${getProbabilityClass(row.predictedProbability)}`}
+                    className={`px-4 py-3 font-semibold ${getProbabilityClass(getDisplayedHrProbability(row) ?? 0)}`}
                   >
-                    {formatProbabilityPercent(row.predictedProbability)}
+                    {formatProbabilityPercent(getDisplayedHrProbability(row))}
                   </td>
                   <td className="px-4 py-3 text-slate-300">
                     {formatAmericanOdds(row.sportsbookOddsAmerican)}
                   </td>
                   <td className="px-4 py-3 font-medium text-slate-100">
-                    {formatProbabilityPercent(row.calibratedHrProbability)}
+                    {row.modelScore.toFixed(3)}
                   </td>
                   <td
                     className={`px-4 py-3 font-medium ${getEdgeClass(row.edge)}`}

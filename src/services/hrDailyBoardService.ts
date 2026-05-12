@@ -33,6 +33,7 @@ import {
   fetchPriorBoardReference,
   getBoardStabilityFields,
 } from "@/services/hrBoardStabilityService";
+import { getRealisticDisplayedHrProbability } from "@/services/hrChanceDisplay";
 import {
   summarizeLiveSlateEnvironment,
   type LiveSlateEnvironmentSummary,
@@ -108,11 +109,19 @@ export interface DailyHRBoardRow {
   ballparkName: string | null;
   opposingPitcherName: string | null;
   opposingPitcherThrows: "L" | "R" | null;
+  // Internal ranking score. This stays separate from the public-facing HR chance
+  // so we can tune what users see without disturbing board order.
   modelScore: number;
   rawModelProbability: number;
   rawCalibratedProbability: number;
   conservativeProbability: number;
+  // Public-facing single-game HR estimate used in summaries, history, and UI.
   calibratedHrProbability: number;
+  // Explicit display field so the UI does not need to infer from legacy names.
+  displayedHrProbability: number;
+  // Temporary debug field so we can compare the old mapping against the new one.
+  previousDisplayedProbability: number;
+  // Legacy compatibility alias for older UI and snapshot consumers.
   predictedProbability: number;
   tier: string;
   hrTier: HRTierLabel;
@@ -158,11 +167,16 @@ export interface DailyHRBoardRow {
   environmentDebug: {
     homeTeam: string;
     awayTeam: string;
+    venueId: string | null;
+    venueName: string | null;
     parkName: string | null;
     parkFactor: number;
+    weatherSourceLocation: string | null;
+    weatherLookupType: string | null;
     temperature: number | null;
     windSpeed: number | null;
     windDirection: string | null;
+    windOutToCenter: number | null;
     environmentScore: number;
     environmentContributionToFinalScore: number;
   };
@@ -312,18 +326,18 @@ function getMedian(values: number[]): number {
   return sorted[middle];
 }
 
-function remapDisplayedHrProbability(internalProbability: number): number {
-  const clamped = clamp(internalProbability, 0, 0.6);
+function getLegacyDisplayedHrProbability(internalProbability: number): number {
+  const clamped = clamp(internalProbability, 0, 0.35);
 
   if (clamped <= 0) {
     return 0;
   }
 
-  // Preserve ordering but compress the display layer into a realistic single-game HR range.
-  const maxDisplayProbability = 0.28;
-  const shape = 2.2;
+  // Legacy compressed display mapping kept only for temporary debug comparison.
+  const maxDisplayProbability = 0.18;
+  const shape = 3.5;
   const normalized =
-    (1 - Math.exp(-shape * clamped)) / (1 - Math.exp(-shape * 0.6));
+    (1 - Math.exp(-shape * clamped)) / (1 - Math.exp(-shape * 0.35));
 
   return clamp(maxDisplayProbability * normalized, 0, maxDisplayProbability);
 }
@@ -764,6 +778,10 @@ function finalizeRows(
       rawCalibratedProbability: Number(row.rawCalibratedProbability.toFixed(3)),
       conservativeProbability: Number(row.conservativeProbability.toFixed(3)),
       calibratedHrProbability: Number(row.calibratedHrProbability.toFixed(3)),
+      displayedHrProbability: Number(row.displayedHrProbability.toFixed(3)),
+      previousDisplayedProbability: Number(
+        row.previousDisplayedProbability.toFixed(3),
+      ),
       predictedProbability: Number(row.predictedProbability.toFixed(3)),
       sportsbookImpliedProbability:
         row.sportsbookImpliedProbability != null
@@ -786,6 +804,10 @@ function finalizeRows(
         ...row.environmentDebug,
         parkFactor: roundTo(row.environmentDebug.parkFactor, 3),
         environmentScore: roundTo(row.environmentDebug.environmentScore, 3),
+        windOutToCenter:
+          row.environmentDebug.windOutToCenter != null
+            ? roundTo(row.environmentDebug.windOutToCenter, 3)
+            : null,
         environmentContributionToFinalScore: roundTo(
           row.environmentDebug.environmentContributionToFinalScore,
           4,
@@ -1040,12 +1062,48 @@ async function buildFreshBoard(options: {
       const ballpark = game.ballparkId
         ? (ballparks[game.ballparkId] ?? undefined)
         : undefined;
+      if (!ballpark) {
+        console.warn("[hrDailyBoardService] Missing ballpark lookup for game", {
+          gamePk: game.id,
+          venueId: game.venueId ?? game.ballparkId ?? null,
+          venueName: game.venueName ?? null,
+          homeTeamId: game.homeTeamId,
+          awayTeamId: game.awayTeamId,
+        });
+      }
       const gameContext = buildStructuredGameContext({
         gamePk: game.id,
         awayTeamId: game.awayTeamId,
         homeTeamId: game.homeTeamId,
-        venueName: ballpark?.name ?? null,
+        venueName: game.venueName ?? ballpark?.name ?? null,
       });
+      if (
+        game.venueName &&
+        ballpark?.name &&
+        game.venueName.trim() !== ballpark.name.trim()
+      ) {
+        console.warn("[hrDailyBoardService] Venue mismatch between game and ballpark context", {
+          gamePk: game.id,
+          gameVenueName: game.venueName,
+          ballparkName: ballpark.name,
+          homeTeamId: game.homeTeamId,
+          awayTeamId: game.awayTeamId,
+        });
+      }
+      if (
+        game.venueName &&
+        game.weatherSource?.locationName &&
+        game.weatherSource.lookupType !== "venueId" &&
+        game.weatherSource.lookupType !== "venueName"
+      ) {
+        console.warn("[hrDailyBoardService] Weather lookup did not resolve from canonical venue first", {
+          gamePk: game.id,
+          gameVenueName: game.venueName,
+          weatherSourceLocation: game.weatherSource.locationName,
+          weatherLookupType: game.weatherSource.lookupType,
+          warnings: game.weatherSource.warnings ?? [],
+        });
+      }
 
       const input = buildPredictionInput(batter, pitcher, game, ballpark);
       const baseExample = buildHRFeatureExample(input, 0, targetDate);
@@ -1138,15 +1196,20 @@ async function buildFreshBoard(options: {
         0.6,
       );
       const modelScore = adjustedProbability;
-      const calibratedHrProbability =
-        remapDisplayedHrProbability(adjustedProbability);
-
       const odds = findBestOddsMatch(
         oddsLookup.byPlayerName,
         example.batterName,
       );
       const impliedProbability = odds?.impliedProbability ?? null;
       const sportsbookImpliedProbability = impliedProbability;
+      const previousDisplayedProbability =
+        getLegacyDisplayedHrProbability(adjustedProbability);
+      const displayedHrProbability = getRealisticDisplayedHrProbability({
+        modelScore,
+        rawProbability: rawModelProbability,
+        oddsImpliedProbability: impliedProbability,
+      });
+      const calibratedHrProbability = displayedHrProbability;
       const modelEdgeRaw =
         impliedProbability != null
           ? adjustedProbability - impliedProbability
@@ -1187,7 +1250,7 @@ async function buildFreshBoard(options: {
         isHome,
         boardRow: {
           modelScore,
-          predictedProbability: calibratedHrProbability,
+          predictedProbability: displayedHrProbability,
           edge,
         },
         odds,
@@ -1220,7 +1283,9 @@ async function buildFreshBoard(options: {
         rawCalibratedProbability,
         conservativeProbability,
         calibratedHrProbability,
-        predictedProbability: calibratedHrProbability,
+        displayedHrProbability,
+        previousDisplayedProbability,
+        predictedProbability: displayedHrProbability,
         tier: getHRProbabilityTier(adjustedProbability),
         hrTier: "Tier 4 - Fringe",
         hrTierReason: "Fringe candidate",
@@ -1259,11 +1324,16 @@ async function buildFreshBoard(options: {
         environmentDebug: {
           homeTeam: String(game.homeTeamId),
           awayTeam: String(game.awayTeamId),
+          venueId: game.venueId ?? game.ballparkId ?? null,
+          venueName: game.venueName ?? ballpark?.name ?? null,
           parkName: ballpark?.name ?? null,
           parkFactor: ballpark?.hrFactor ?? example.parkHrFactor,
+          weatherSourceLocation: game.weatherSource?.locationName ?? null,
+          weatherLookupType: game.weatherSource?.lookupType ?? null,
           temperature: game.weather?.temp ?? null,
           windSpeed: game.weather?.windSpeed ?? null,
           windDirection: game.weather?.windDirection ?? null,
+          windOutToCenter: game.weather?.windOutToCenter ?? null,
           environmentScore: (gameEnvironment.multiplier - 1) * 100,
           environmentContributionToFinalScore:
             adjustedProbability - conservativeProbability,
@@ -1436,6 +1506,79 @@ export async function buildDailyHRBoard(options?: {
     sortMode,
     stabilityAdjustedRows.length,
   );
+  console.table(
+    finalizedAllRows.slice(0, 25).map((row) => ({
+      playerName: row.batterName,
+      playerTeam: row.teamId,
+      opponentTeam: row.opponentTeamId,
+      rank: row.rank,
+      matchupLabel: row.matchupLabel,
+      homeTeam: row.homeTeamId,
+      awayTeam: row.awayTeamId,
+      venueName: row.venueName ?? row.ballparkName ?? null,
+      venueId: row.environmentDebug.venueId,
+      parkFactor: row.environmentDebug.parkFactor,
+      weatherSourceLocation: row.environmentDebug.weatherSourceLocation,
+      weatherLookupType: row.environmentDebug.weatherLookupType,
+      windDirection: row.environmentDebug.windDirection,
+      windOutToCenter: row.environmentDebug.windOutToCenter,
+      environmentScore: row.environmentDebug.environmentScore,
+      modelScore: Number(row.modelScore.toFixed(3)),
+      rawProbability: Number(row.rawModelProbability.toFixed(3)),
+      previousDisplayedProbability: Number(
+        row.previousDisplayedProbability.toFixed(3),
+      ),
+      calibratedHrProbability: Number(row.calibratedHrProbability.toFixed(3)),
+      displayedHrProbability: Number(row.displayedHrProbability.toFixed(3)),
+      sportsbookImpliedProbability:
+        row.impliedProbability != null
+          ? Number(row.impliedProbability.toFixed(3))
+          : null,
+    })),
+  );
+  const perGameEnvironmentSummary = Array.from(
+    finalizedAllRows.reduce<
+      Map<
+        string,
+        {
+          matchupLabel: string;
+          venueName: string | null;
+          venueId: string | null;
+          weatherSourceLocation: string | null;
+          parkFactor: number;
+          environmentScore: number;
+          players: string[];
+        }
+      >
+    >((map, row) => {
+      const current = map.get(row.gamePk);
+      if (current) {
+        current.players.push(row.batterName);
+        return map;
+      }
+
+      map.set(row.gamePk, {
+        matchupLabel: row.matchupLabel,
+        venueName: row.venueName ?? row.ballparkName ?? null,
+        venueId: row.environmentDebug.venueId,
+        weatherSourceLocation: row.environmentDebug.weatherSourceLocation,
+        parkFactor: row.environmentDebug.parkFactor,
+        environmentScore: row.environmentDebug.environmentScore,
+        players: [row.batterName],
+      });
+      return map;
+    }, new Map()),
+  ).map(([gamePk, summary]) => ({
+    gamePk,
+    matchupLabel: summary.matchupLabel,
+    venueName: summary.venueName,
+    venueId: summary.venueId,
+    weatherSourceLocation: summary.weatherSourceLocation,
+    parkFactor: summary.parkFactor,
+    environmentScore: summary.environmentScore,
+    players: summary.players.join(", "),
+  }));
+  console.table(perGameEnvironmentSummary);
   const displayLimitExclusions = finalizedAllRows
     .slice(limit)
     .map((row) => ({
